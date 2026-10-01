@@ -23,6 +23,14 @@ test('PING → PONG', async () => {
   assert.deepEqual(await (await call({ type: 1 })).json(), { type: 1 });
 });
 
+test('makelippo', async () => {
+  const lippo = async (s) => (await (await call({ type: 2, data: { name: 'makelippo', options: [{ name: 'laskutoimitus', value: s }] } })).json()).data;
+  for (const [s, v] of [['2+3*4', '14'], ['(2+3)*4', '20'], ['2^3^2', '512'], ['-2^2', '-4'], ['1,5*2', '3'], ['0.1+0.2', '0,3'], ['7÷2', '3,5'], ['2 × −3', '-6']]) {
+    assert.equal((await lippo(s)).content, `\`${s}\` = **${v}** 🤓`);
+  }
+  for (const s of ['1/0', '2+', '(1', '1)', 'abc', '']) assert.equal((await lippo(s)).flags, 64);
+});
+
 test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
   assert.equal(await roll({ name: 'max', value: 1 }), 1);
   const seen = new Set();

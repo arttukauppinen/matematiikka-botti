@@ -1,4 +1,44 @@
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
+const reply = (content, flags) => Response.json({ type: 4, data: { content, flags } });
+
+const calc = (s) => {
+  const t = s.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-').match(/\d+(?:[.,]\d+)?|\S/g) ?? [];
+  let i = 0;
+  const eat = (c) => t[i] === c && ++i;
+  const expr = () => {
+    let v = term();
+    for (;;) {
+      if (eat('+')) v += term();
+      else if (eat('-')) v -= term();
+      else return v;
+    }
+  };
+  const term = () => {
+    let v = unary();
+    for (;;) {
+      if (eat('*')) v *= unary();
+      else if (eat('/')) v /= unary();
+      else return v;
+    }
+  };
+  const unary = () => (eat('-') ? -unary() : eat('+') ? unary() : pow());
+  const pow = () => {
+    const b = atom();
+    return eat('^') ? b ** unary() : b;
+  };
+  const atom = () => {
+    if (eat('(')) {
+      const v = expr();
+      if (!eat(')')) throw 0;
+      return v;
+    }
+    if (!/^\d/.test(t[i] ?? '')) throw 0;
+    return parseFloat(t[i++].replace(',', '.'));
+  };
+  const v = expr();
+  if (i < t.length || !Number.isFinite(v)) throw 0;
+  return String(+v.toPrecision(12)).replace('.', ',');
+};
 
 export default {
   async fetch(req, env) {
@@ -12,8 +52,16 @@ export default {
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries(data.options.map((x) => [x.name, x.value]));
+    if (data.name === 'makelippo') {
+      try {
+        return reply(`\`${o.laskutoimitus}\` = **${calc(o.laskutoimitus)}** 🤓`);
+      } catch {
+        return reply(`En osaa laskea tätä: \`${o.laskutoimitus}\` 🤓`, 64);
+      }
+    }
+
     const lo = Math.min(o.min ?? 1, o.max);
     const hi = Math.max(o.min ?? 1, o.max);
-    return Response.json({ type: 4, data: { content: `🎲 ${lo + Math.floor(Math.random() * (hi - lo + 1))}` } });
+    return reply(`🎲 ${lo + Math.floor(Math.random() * (hi - lo + 1))}`);
   },
 };
