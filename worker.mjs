@@ -1,5 +1,11 @@
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags) => Response.json({ type: 4, data: { content, flags } });
+const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊'];
+const addCoins = async (store, playerId, amount) => {
+  const balance = +(await store.get(playerId) ?? 0) + amount;
+  await store.put(playerId, String(balance));
+  return balance;
+};
 
 const calc = (s) => {
   const t = s.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-').match(/\d+(?:[.,]\d+)?|\S/g) ?? [];
@@ -51,13 +57,28 @@ export default {
     const { type, data } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
-    const o = Object.fromEntries(data.options.map((x) => [x.name, x.value]));
+    const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
     if (data.name === 'makelippo') {
       try {
         return reply(`\`${o.laskutoimitus}\` = **${calc(o.laskutoimitus)}** 🤓`);
       } catch {
         return reply(`En osaa laskea tätä: \`${o.laskutoimitus}\` 🤓`, 64);
       }
+    }
+    if (data.name === 'goneisii') {
+      const reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
+      const matches = new Set(reels).size;
+      const winnings = matches === 1 ? 100 : matches === 2 ? 10 : 0;
+      const result = matches === 1 ? 'JACKPOT! 🎉' : matches === 2 ? 'close ✨' : 'ei voittoa';
+      const playerId = data.member?.user?.id ?? data.user?.id;
+      if (!env.COINS || !playerId) return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}`);
+      const balance = await addCoins(env.COINS, playerId, winnings);
+      return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}\n+${winnings} kolikkoa | saldo: **${balance}** 🪙`);
+    }
+    if (data.name === 'kukkaro') {
+      const playerId = data.member?.user?.id ?? data.user?.id;
+      const balance = env.COINS && playerId ? +(await env.COINS.get(playerId) ?? 0) : 0;
+      return reply(`Sulla on **${balance}** kolikkoa 🪙`);
     }
 
     const lo = Math.min(o.min ?? 1, o.max);

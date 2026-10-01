@@ -17,15 +17,16 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v5
-      - run: npx -y wrangler@4 deploy worker.mjs --name matematiikka-botti --compatibility-date 2026-09-01 --var DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY
+      - run: npx -y wrangler@4 deploy worker.mjs --name matematiikka-botti --compatibility-date 2026-09-01 --var DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY --kv COINS=$COINS_KV_NAMESPACE_ID
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
           DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
+          COINS_KV_NAMESPACE_ID: ${{ secrets.COINS_KV_NAMESPACE_ID }}
       - env:
           DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
         run: >-
           curl --fail-with-body -sS -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands"
           -H "Authorization: Bot $DISCORD_TOKEN" -H "Content-Type: application/json"
-          -d '[{"name":"roll","description":"Arpoo kokonaisluvun väliltä min–max","integration_types":[0,1],"contexts":[0,1,2],"options":[{"type":4,"name":"max","description":"yläraja","required":true},{"type":4,"name":"min","description":"alaraja, oletus 1"}]},{"name":"makelippo","description":"Laskee laskutoimituksen","integration_types":[0,1],"contexts":[0,1,2],"options":[{"type":3,"name":"laskutoimitus","description":"esim. (2+3)*4^2","required":true,"max_length":200}]}]'
+          -d '[{"name":"roll","description":"Arpoo kokonaisluvun väliltä min–max","integration_types":[0,1],"contexts":[0,1,2],"options":[{"type":4,"name":"max","description":"yläraja","required":true},{"type":4,"name":"min","description":"alaraja, oletus 1"}]},{"name":"makelippo","description":"Laskee laskutoimituksen","integration_types":[0,1],"contexts":[0,1,2],"options":[{"type":3,"name":"laskutoimitus","description":"esim. (2+3)*4^2","required":true,"max_length":200}]},{"name":"goneisii","description":"Pyöritä kolmea hedelmärullaa","integration_types":[0,1],"contexts":[0,1,2]},{"name":"kukkaro","description":"Näytä kolikkosaldosi","integration_types":[0,1],"contexts":[0,1,2]}]'
