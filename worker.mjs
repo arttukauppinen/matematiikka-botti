@@ -87,14 +87,29 @@ export default {
       return reply(`\`\`\`\n${lines.join('\n')}\n\`\`\``);
     }
 
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava'].includes(data.name)) {
-      const name = member?.nick ?? (member?.user ?? user)?.global_name ?? (member?.user ?? user)?.username ?? playerId;
-      const key = `g:${guild_id}:${playerId}`;
+    const mark = async (id, m, u) => {
+      const name = m?.nick ?? u?.global_name ?? u?.username ?? id;
+      const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
-    }
+    };
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
+
+    if (data.name === 'lainaa') {
+      const to = o.kenelle;
+      const amount = o.määrä;
+      if (!store || !guild_id) return reply('Lainaus toimii vain palvelimella.', 64);
+      if (to === playerId) return reply('Et voi lainata itsellesi.', 64);
+      if (data.resolved?.users?.[to]?.bot) return reply('Botille ei voi lainata.', 64);
+      if (coins < amount) return reply(`Ei tarpeeksi kolikkoja, sulla on **${coins}** 🪙`, 64);
+      const [theirs, theirDay] = await walletOf(store, to);
+      await store.put(playerId, `${coins - amount} ${day ?? ''}`.trim());
+      await store.put(to, `${theirs + amount} ${theirDay ?? ''}`.trim());
+      await mark(to, data.resolved?.members?.[to], data.resolved?.users?.[to]);
+      return reply(`💸 <@${playerId}> → <@${to}> **${amount}** 🪙`);
+    }
 
     if (data.name === 'goneisii' || data.name === 'gruunavaiglaava') {
       const cost = data.name === 'goneisii' ? 3 : (o.panos ?? 1);

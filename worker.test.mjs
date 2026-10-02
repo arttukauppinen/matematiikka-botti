@@ -127,6 +127,33 @@ test('leaderboard: palvelimen pelaajat tasattuna, rikkain ensin', async () => {
   }
 });
 
+test('lainaa: siirtää saldoa saman palvelimen pelaajalle', async () => {
+  const lend = async (from, to, amount, guild_id = 'g9', bot = false) =>
+    settle(
+      await call({
+        type: 2,
+        guild_id,
+        member: { user: { id: from, username: from } },
+        data: {
+          name: 'lainaa',
+          options: [{ name: 'kenelle', value: to }, { name: 'määrä', value: amount }],
+          resolved: { users: { [to]: { id: to, username: `${to}_user`, bot } }, members: { [to]: { nick: `${to}_nick` } } },
+        },
+      }),
+    );
+  const purse = async (id) => (await settle(await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id } } }))).content;
+
+  assert.equal((await lend('p1', 'p2', 4)).content, '💸 <@p1> → <@p2> **4** 🪙');
+  assert.equal(await purse('p1'), 'Sulla on **6** kolikkoa 🪙');
+  assert.equal(await purse('p2'), 'Sulla on **14** kolikkoa 🪙');
+  assert.equal(balances.get('g:g9:p2'), 'p2_nick');
+  assert.equal((await lend('p1', 'p2', 7)).flags, 64);
+  assert.equal((await lend('p1', 'p1', 1)).flags, 64);
+  assert.equal((await lend('p1', 'robo', 1, 'g9', true)).flags, 64);
+  assert.equal((await lend('p1', 'p2', 1, null)).flags, 64);
+  assert.equal(await purse('p1'), 'Sulla on **6** kolikkoa 🪙');
+});
+
 test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
   assert.equal(await roll({ name: 'max', value: 1 }), 1);
   const seen = new Set();
