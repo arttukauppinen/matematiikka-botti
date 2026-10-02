@@ -1,6 +1,8 @@
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags) => Response.json({ type: 4, data: { content, flags } });
 const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊'];
+const SPIN = '<a:slot_spin:1555491281000472646>';
+const WIN = '<a:jackpot:1555491279385792593>';
 const walletOf = async (store, playerId) => {
   const [coins, day] = ((await store.get(playerId)) ?? '0').split(' ');
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Helsinki' });
@@ -47,14 +49,14 @@ const calc = (s) => {
 };
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const body = await req.text();
     const key = await crypto.subtle.importKey('raw', hex(env.DISCORD_PUBLIC_KEY), 'Ed25519', false, ['verify']);
     const msg = new TextEncoder().encode(req.headers.get('x-signature-timestamp') + body);
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data, member, user, guild_id } = JSON.parse(body);
+    const { type, data, member, user, guild_id, application_id, token } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -98,20 +100,35 @@ export default {
       const cost = data.name === 'goneisii' ? 3 : (o.panos ?? 1);
       if (store && coins < cost) return reply(`Ei tarpeeksi kolikkoja, tarvitset ${cost} 🪙 Nollasaldolla saat 10 ilmaista kerran päivässä.`, 64);
 
-      let text, net;
+      let text, net, reels;
       if (data.name === 'goneisii') {
-        const reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
+        reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
         const matches = new Set(reels).size;
         net = (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
-        text = `🎰 ${reels.join(' | ')} 🎰\n${matches === 1 ? 'JACKPOT! 🎉' : matches === 2 ? 'close ✨' : 'ei voittoa'}`;
+        text = `🎰 ${reels.join(' | ')} 🎰\n${matches === 1 ? `# ${WIN} JACKPOT! ${WIN}` : matches === 2 ? 'close ✨' : 'ei voittoa'}`;
       } else {
         const side = Math.random() < 0.5 ? 'kruuna' : 'klaava';
         net = side === o.valinta ? cost : -cost;
         text = `🪙 ${side}`;
       }
-      if (!store) return reply(text);
-      await store.put(playerId, `${coins + net} ${day ?? ''}`.trim());
-      return reply(`${text}\n${net < 0 ? '' : '+'}${net} 🪙`);
+      if (store) await store.put(playerId, `${coins + net} ${day ?? ''}`.trim());
+      const out = store ? `${text}\n${net < 0 ? '' : '+'}${net} 🪙` : text;
+      if (!reels) return reply(out);
+
+      const frame = (n) => `🎰 ${reels.map((r, i) => (i < n ? r : SPIN)).join(' | ')} 🎰`;
+      ctx.waitUntil(
+        (async () => {
+          for (const content of [frame(1), frame(2), out]) {
+            await scheduler.wait(1000);
+            await fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content }),
+            });
+          }
+        })(),
+      );
+      return reply(frame(0));
     }
 
     const lo = Math.min(o.min ?? 1, o.max);

@@ -11,11 +11,24 @@ const coins = {
 };
 const env = { DISCORD_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('raw', publicKey)).toString('hex'), COINS: coins };
 
+const pending = [];
+const edits = [];
+const waits = [];
+globalThis.scheduler = { wait: async (ms) => waits.push(ms) };
+globalThis.fetch = async (url, init) => edits.push([url, JSON.parse(init.body).content]);
+const ctx = { waitUntil: (p) => pending.push(p) };
+
 const call = async (i, tamper = '') => {
   const body = JSON.stringify(i);
   const sig = Buffer.from(await crypto.subtle.sign('Ed25519', privateKey, new TextEncoder().encode('1' + body))).toString('hex');
   const headers = { 'x-signature-ed25519': sig, 'x-signature-timestamp': '1' };
-  return worker.fetch(new Request('http://x', { method: 'POST', body: body + tamper, headers }), env);
+  return worker.fetch(new Request('http://x', { method: 'POST', body: body + tamper, headers }), env, ctx);
+};
+
+const settle = async (res) => {
+  const d = (await res.json()).data;
+  await Promise.all(pending.splice(0));
+  return edits.length ? { ...d, content: edits.splice(0).at(-1)[1] } : d;
 };
 
 const roll = async (...options) => +(await (await call({ type: 2, data: { options } })).json()).data.content.split(' ')[1];
@@ -40,7 +53,7 @@ test('makelippo', async () => {
 test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldolla', async () => {
   const play = async (id, name, randoms = [], ...options) => {
     Math.random = () => randoms.shift();
-    return (await (await call({ type: 2, data: { name, options }, member: { user: { id } } })).json()).data;
+    return settle(await call({ type: 2, data: { name, options }, member: { user: { id } } }));
   };
   const kruuna = { name: 'valinta', value: 'kruuna' };
   const panos = (value) => ({ name: 'panos', value });
@@ -57,7 +70,7 @@ test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldol
     assert.equal((await play('a', 'gruunavaiglaava', [0], kruuna)).flags, 64);
     assert.equal((await play('a', 'kukkaro')).content, 'Sulla on **0** kolikkoa 🪙');
 
-    assert.equal((await play('b', 'goneisii', [0, 0, 0])).content, '🎰 🍒 | 🍒 | 🍒 🎰\nJACKPOT! 🎉\n+97 🪙');
+    assert.match((await play('b', 'goneisii', [0, 0, 0])).content, /^🎰 🍒 \| 🍒 \| 🍒 🎰\n# (\S+) JACKPOT! \1\n\+97 🪙$/u);
     assert.equal((await play('b', 'goneisii', [0, 0.21, 0])).content, '🎰 🍒 | 🍋 | 🍒 🎰\nclose ✨\n+7 🪙');
     assert.equal((await play('b', 'kukkaro')).content, 'Sulla on **114** kolikkoa 🪙');
 
@@ -72,10 +85,32 @@ test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldol
   }
 });
 
+test('goneisii: rullat paljastuvat sekunnin välein', async () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0;
+    waits.length = 0;
+    const res = await call({ type: 2, application_id: 'app', token: 'tok', data: { name: 'goneisii', options: [] }, member: { user: { id: 'anim' } } });
+    const [, spin] = (await res.json()).data.content.match(/^🎰 (\S+) \| \1 \| \1 🎰$/u);
+    await Promise.all(pending.splice(0));
+    const url = 'https://discord.com/api/v10/webhooks/app/tok/messages/@original';
+    const [one, two, last] = edits.splice(0);
+    assert.deepEqual([one, two], [
+      [url, `🎰 🍒 | ${spin} | ${spin} 🎰`],
+      [url, `🎰 🍒 | 🍒 | ${spin} 🎰`],
+    ]);
+    assert.equal(last[0], url);
+    assert.match(last[1], /^🎰 🍒 \| 🍒 \| 🍒 🎰\n# (\S+) JACKPOT! \1\n\+97 🪙$/u);
+    assert.deepEqual(waits, [1000, 1000, 1000]);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
 test('leaderboard: palvelimen pelaajat tasattuna, rikkain ensin', async () => {
   const send = async (name, guild_id, member, randoms = [], ...options) => {
     Math.random = () => randoms.shift();
-    return (await (await call({ type: 2, data: { name, options }, guild_id, member })).json()).data;
+    return settle(await call({ type: 2, data: { name, options }, guild_id, member }));
   };
   const originalRandom = Math.random;
   try {
