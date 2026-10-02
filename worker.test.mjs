@@ -73,6 +73,8 @@ test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldol
     assert.match((await play('b', 'goneisii', [0, 0, 0])).content, /^🎰 🍒 \| 🍒 \| 🍒 🎰\n# (\S+) JACKPOT! \1\n\+97 🪙$/u);
     assert.equal((await play('b', 'goneisii', [0, 0.21, 0])).content, '🎰 🍒 | 🍋 | 🍒 🎰\nclose ✨\n+7 🪙');
     assert.equal((await play('b', 'kukkaro')).content, 'Sulla on **114** kolikkoa 🪙');
+    assert.match((await play('b', 'goneisii', [0.9, 0.9, 0.9])).content, /^🎰 💀 \| 💀 \| 💀 🎰\n# (\S+) SHITPOT! \1\n-81 🪙$/u);
+    assert.equal((await play('b', 'kukkaro')).content, 'Sulla on **33** kolikkoa 🪙');
 
     balances.set('c', '0 2000-01-01');
     balances.set('d', '1 2000-01-01');

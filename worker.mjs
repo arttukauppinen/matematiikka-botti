@@ -1,8 +1,9 @@
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags) => Response.json({ type: 4, data: { content, flags } });
-const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊'];
+const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊', '💀'];
 const SPIN = '<a:slot_spin:1555491281000472646>';
 const WIN = '<a:jackpot:1555491279385792593>';
+const LOSE = WIN; // ponytail: same gif as jackpot until a shitpot gif is uploaded
 const walletOf = async (store, playerId) => {
   const [coins, day] = ((await store.get(playerId)) ?? '0').split(' ');
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Helsinki' });
@@ -119,8 +120,10 @@ export default {
       if (data.name === 'goneisii') {
         reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
         const matches = new Set(reels).size;
-        net = (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
-        text = `🎰 ${reels.join(' | ')} 🎰\n${matches === 1 ? `# ${WIN} JACKPOT! ${WIN}` : matches === 2 ? 'close ✨' : 'ei voittoa'}`;
+        const shit = matches === 1 && reels[0] === '💀';
+        net = shit ? -cost - Math.ceil((coins - cost) * 0.7) : (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
+        const verdict = shit ? `# ${LOSE} SHITPOT! ${LOSE}` : matches === 1 ? `# ${WIN} JACKPOT! ${WIN}` : matches === 2 ? 'close ✨' : 'ei voittoa';
+        text = `🎰 ${reels.join(' | ')} 🎰\n${verdict}`;
       } else {
         const side = Math.random() < 0.5 ? 'kruuna' : 'klaava';
         net = side === o.valinta ? cost : -cost;
