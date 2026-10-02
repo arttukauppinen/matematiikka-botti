@@ -36,20 +36,36 @@ test('makelippo', async () => {
   for (const s of ['1/0', '2+', '(1', '1)', 'abc', '']) assert.equal((await lippo(s)).flags, 64);
 });
 
-test('goneisii: kolme hedelmärullaa ja voitot', async () => {
+test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldolla', async () => {
+  const play = async (id, name, randoms = [], ...options) => {
+    Math.random = () => randoms.shift();
+    return (await (await call({ type: 2, data: { name, options }, member: { user: { id } } })).json()).data;
+  };
+  const kruuna = { name: 'valinta', value: 'kruuna' };
+  const panos = (value) => ({ name: 'panos', value });
   const originalRandom = Math.random;
   try {
-    Math.random = () => 0;
-    const jackpot = (await (await call({ type: 2, data: { name: 'goneisii', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
-    assert.match(jackpot, /^🎰 (🍒 \| ){2}🍒 🎰\nJACKPOT![\s\S]*\+100 kolikkoa \| saldo: \*\*100\*\*/u);
+    assert.equal((await play('a', 'kukkaro')).content, 'Sulla on **10** kolikkoa 🪙');
+    assert.equal((await play('a', 'goneisii', [0, 0.21, 0.41])).content, '🎰 🍒 | 🍋 | 🍉 🎰\nei voittoa\n-3 🪙');
+    assert.equal((await play('a', 'gruunavaiglaava', [0], kruuna, panos(2))).content, '🪙 kruuna\n+2 🪙');
+    assert.equal((await play('a', 'gruunavaiglaava', [0.9], kruuna)).content, '🪙 klaava\n-1 🪙');
+    assert.equal((await play('a', 'gruunavaiglaava', [0.9], kruuna, panos(6))).content, '🪙 klaava\n-6 🪙');
+    assert.equal((await play('a', 'goneisii', [0, 0, 0])).flags, 64);
+    assert.equal((await play('a', 'gruunavaiglaava', [0], kruuna, panos(3))).flags, 64);
+    assert.equal((await play('a', 'gruunavaiglaava', [0.9], kruuna, panos(2))).content, '🪙 klaava\n-2 🪙');
+    assert.equal((await play('a', 'gruunavaiglaava', [0], kruuna)).flags, 64);
+    assert.equal((await play('a', 'kukkaro')).content, 'Sulla on **0** kolikkoa 🪙');
 
-    let spin = 0;
-    Math.random = () => [0, 0.21, 0][spin++];
-    const pair = (await (await call({ type: 2, data: { name: 'goneisii', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
-    assert.match(pair, /^🎰 🍒 \| 🍋 \| 🍒 🎰\nclose ✨[\s\S]*\+10 kolikkoa \| saldo: \*\*110\*\*/u);
+    assert.equal((await play('b', 'goneisii', [0, 0, 0])).content, '🎰 🍒 | 🍒 | 🍒 🎰\nJACKPOT! 🎉\n+97 🪙');
+    assert.equal((await play('b', 'goneisii', [0, 0.21, 0])).content, '🎰 🍒 | 🍋 | 🍒 🎰\nclose ✨\n+7 🪙');
+    assert.equal((await play('b', 'kukkaro')).content, 'Sulla on **114** kolikkoa 🪙');
 
-    const balance = (await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
-    assert.equal(balance, 'Sulla on **110** kolikkoa 🪙');
+    balances.set('c', '0 2000-01-01');
+    balances.set('d', '1 2000-01-01');
+    balances.set('e', '190');
+    assert.equal((await play('c', 'kukkaro')).content, 'Sulla on **10** kolikkoa 🪙');
+    assert.equal((await play('d', 'kukkaro')).content, 'Sulla on **1** kolikkoa 🪙');
+    assert.equal((await play('e', 'kukkaro')).content, 'Sulla on **190** kolikkoa 🪙');
   } finally {
     Math.random = originalRandom;
   }

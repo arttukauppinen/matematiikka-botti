@@ -4,7 +4,9 @@ Fork → PR → vihreä `node --test` (Node ≥ 22) → merge ⇒ tuotanto
 
 ## Kolikoiden pysyvä tallennus
 
-`/goneisii`-komennon voitot tallennetaan Cloudflare KV:hen käyttäjän Discord-tunnuksella. Ilman `COINS`-sidontaa komento toimii edelleen, mutta saldoa ei tallenneta pysyvästi.
+`/goneisii` maksaa 3 (3 samaa 100, 2 samaa 10) ja `/gruunavaiglaava valinta [panos]` (oletus 1, oikein +panos, väärin −panos), saldo `/kukkaro`. Nollasaldolla saa 10 kolikkoa kerran päivässä.
+
+`/goneisii`- ja `/gruunavaiglaava`-komentojen voitot ja häviöt tallennetaan Cloudflare KV:hen käyttäjän Discord-tunnuksella. Ilman `COINS`-sidontaa komento toimii edelleen, mutta saldoa ei tallenneta pysyvästi.
 
 Ylläpitäjä voi ottaa tallennuksen käyttöön näin:
 

@@ -1,10 +1,10 @@
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags) => Response.json({ type: 4, data: { content, flags } });
 const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊'];
-const addCoins = async (store, playerId, amount) => {
-  const balance = +(await store.get(playerId) ?? 0) + amount;
-  await store.put(playerId, String(balance));
-  return balance;
+const walletOf = async (store, playerId) => {
+  const [coins, day] = ((await store.get(playerId)) ?? '0').split(' ');
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Helsinki' });
+  return +coins === 0 && day !== today ? [10, today] : [+coins, day];
 };
 
 const calc = (s) => {
@@ -65,20 +65,29 @@ export default {
         return reply(`En osaa laskea tätä: \`${o.laskutoimitus}\` 🤓`, 64);
       }
     }
-    if (data.name === 'goneisii') {
-      const reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
-      const matches = new Set(reels).size;
-      const winnings = matches === 1 ? 100 : matches === 2 ? 10 : 0;
-      const result = matches === 1 ? 'JACKPOT! 🎉' : matches === 2 ? 'close ✨' : 'ei voittoa';
-      const playerId = (member?.user ?? user)?.id;
-      if (!env.COINS || !playerId) return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}`);
-      const balance = await addCoins(env.COINS, playerId, winnings);
-      return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}\n+${winnings} kolikkoa | saldo: **${balance}** 🪙`);
-    }
-    if (data.name === 'kukkaro') {
-      const playerId = (member?.user ?? user)?.id;
-      const balance = env.COINS && playerId ? +(await env.COINS.get(playerId) ?? 0) : 0;
-      return reply(`Sulla on **${balance}** kolikkoa 🪙`);
+    const playerId = (member?.user ?? user)?.id;
+    const store = playerId && env.COINS;
+    const [coins, day] = store ? await walletOf(store, playerId) : [];
+    if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
+
+    if (data.name === 'goneisii' || data.name === 'gruunavaiglaava') {
+      const cost = data.name === 'goneisii' ? 3 : (o.panos ?? 1);
+      if (store && coins < cost) return reply(`Ei tarpeeksi kolikkoja, tarvitset ${cost} 🪙 Nollasaldolla saat 10 ilmaista kerran päivässä.`, 64);
+
+      let text, net;
+      if (data.name === 'goneisii') {
+        const reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
+        const matches = new Set(reels).size;
+        net = (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
+        text = `🎰 ${reels.join(' | ')} 🎰\n${matches === 1 ? 'JACKPOT! 🎉' : matches === 2 ? 'close ✨' : 'ei voittoa'}`;
+      } else {
+        const side = Math.random() < 0.5 ? 'kruuna' : 'klaava';
+        net = side === o.valinta ? cost : -cost;
+        text = `🪙 ${side}`;
+      }
+      if (!store) return reply(text);
+      await store.put(playerId, `${coins + net} ${day ?? ''}`.trim());
+      return reply(`${text}\n${net < 0 ? '' : '+'}${net} 🪙`);
     }
 
     const lo = Math.min(o.min ?? 1, o.max);
