@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import worker from './worker.mjs';
 
 const { publicKey, privateKey } = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
-const env = { DISCORD_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('raw', publicKey)).toString('hex') };
+const balances = new Map();
+const coins = {
+  get: async (key) => balances.get(key),
+  put: async (key, value) => balances.set(key, value),
+};
+const env = { DISCORD_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('raw', publicKey)).toString('hex'), COINS: coins };
 
 const call = async (i, tamper = '') => {
   const body = JSON.stringify(i);
@@ -29,6 +34,25 @@ test('makelippo', async () => {
     assert.equal((await lippo(s)).content, `\`${s}\` = **${v}** 🤓`);
   }
   for (const s of ['1/0', '2+', '(1', '1)', 'abc', '']) assert.equal((await lippo(s)).flags, 64);
+});
+
+test('goneisii: kolme hedelmärullaa ja voitot', async () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0;
+    const jackpot = (await (await call({ type: 2, data: { name: 'goneisii', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    assert.match(jackpot, /^🎰 (🍒 \| ){2}🍒 🎰\nJACKPOT![\s\S]*\+100 kolikkoa \| saldo: \*\*100\*\*/u);
+
+    let spin = 0;
+    Math.random = () => [0, 0.21, 0][spin++];
+    const pair = (await (await call({ type: 2, data: { name: 'goneisii', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    assert.match(pair, /^🎰 🍒 \| 🍋 \| 🍒 🎰\nclose ✨[\s\S]*\+10 kolikkoa \| saldo: \*\*110\*\*/u);
+
+    const balance = (await (await call({ type: 2, data: { name: 'kukkaro', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    assert.equal(balance, 'Sulla on **110** kolikkoa 🪙');
+  } finally {
+    Math.random = originalRandom;
+  }
 });
 
 test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
