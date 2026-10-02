@@ -17,7 +17,9 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v5
-      - run: npx -y wrangler@4 deploy worker.mjs --name matematiikka-botti --compatibility-date 2026-09-01 --var DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY --kv COINS=$COINS_KV_NAMESPACE_ID
+      - run: |
+          echo "{\"kv_namespaces\":[{\"binding\":\"COINS\",\"id\":\"$COINS_KV_NAMESPACE_ID\"}]}" > wrangler.json
+          npx -y wrangler@4 deploy worker.mjs --name matematiikka-botti --compatibility-date 2026-09-01 --var DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
