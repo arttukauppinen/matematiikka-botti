@@ -54,7 +54,7 @@ export default {
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data, member, user } = JSON.parse(body);
+    const { type, data, member, user, guild_id } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -67,6 +67,30 @@ export default {
     }
     const playerId = (member?.user ?? user)?.id;
     const store = playerId && env.COINS;
+
+    if (data.name === 'leaderboard') {
+      if (!guild_id || !env.COINS) return reply('Leaderboard toimii vain palvelimella.', 64);
+      const { keys } = await env.COINS.list({ prefix: `g:${guild_id}:` });
+      const rows = await Promise.all(
+        keys.map(async ({ name: key }) => [
+          ((await env.COINS.get(key)) ?? '').replace(/`/g, "'").slice(0, 16),
+          (await walletOf(env.COINS, key.split(':')[2]))[0],
+        ]),
+      );
+      if (!rows.length) return reply('Tällä palvelimella ei ole vielä pelaajia.', 64);
+      const top = rows.sort((a, b) => b[1] - a[1]).slice(0, 10);
+      const w = Math.max(...top.map(([n]) => n.length));
+      const sw = Math.max(...top.map(([, c]) => String(c).length));
+      const lines = top.map(([n, c], i) => `${String(i + 1).padStart(2)}  ${n.padEnd(w)}  ${String(c).padStart(sw)}`);
+      return reply(`\`\`\`\n${lines.join('\n')}\n\`\`\``);
+    }
+
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava'].includes(data.name)) {
+      const name = member?.nick ?? (member?.user ?? user)?.global_name ?? (member?.user ?? user)?.username ?? playerId;
+      const key = `g:${guild_id}:${playerId}`;
+      if ((await store.get(key)) !== name) await store.put(key, name);
+    }
+
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
 

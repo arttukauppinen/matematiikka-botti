@@ -7,6 +7,7 @@ const balances = new Map();
 const coins = {
   get: async (key) => balances.get(key),
   put: async (key, value) => balances.set(key, value),
+  list: async ({ prefix }) => ({ keys: [...balances.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) }),
 };
 const env = { DISCORD_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('raw', publicKey)).toString('hex'), COINS: coins };
 
@@ -66,6 +67,26 @@ test('goneisii maksaa 3, gruunavaiglaava panos, päivälahja 10 vain nollasaldol
     assert.equal((await play('c', 'kukkaro')).content, 'Sulla on **10** kolikkoa 🪙');
     assert.equal((await play('d', 'kukkaro')).content, 'Sulla on **1** kolikkoa 🪙');
     assert.equal((await play('e', 'kukkaro')).content, 'Sulla on **190** kolikkoa 🪙');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('leaderboard: palvelimen pelaajat tasattuna, rikkain ensin', async () => {
+  const send = async (name, guild_id, member, randoms = [], ...options) => {
+    Math.random = () => randoms.shift();
+    return (await (await call({ type: 2, data: { name, options }, guild_id, member })).json()).data;
+  };
+  const originalRandom = Math.random;
+  try {
+    await send('gruunavaiglaava', 'g1', { user: { id: 'l3', username: 'Matti`' } }, [0.9], { name: 'valinta', value: 'kruuna' });
+    await send('kukkaro', 'g1', { user: { id: 'l2', username: 'jansfr' } });
+    await send('goneisii', 'g1', { nick: 'Arttu', user: { id: 'l1', username: 'arttu_k' } }, [0, 0, 0]);
+    await send('goneisii', 'g2', { user: { id: 'l4', username: 'Muualla' } }, [0, 0, 0]);
+
+    assert.equal((await send('leaderboard', 'g1')).content, '```\n 1  Arttu   107\n 2  jansfr   10\n 3  Matti\'    9\n```');
+    assert.equal((await send('leaderboard', 'tyhjä')).flags, 64);
+    assert.equal((await send('leaderboard')).flags, 64);
   } finally {
     Math.random = originalRandom;
   }
