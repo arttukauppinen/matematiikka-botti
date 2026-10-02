@@ -40,15 +40,15 @@ test('goneisii: kolme hedelmärullaa ja voitot', async () => {
   const originalRandom = Math.random;
   try {
     Math.random = () => 0;
-    const jackpot = (await (await call({ type: 2, data: { name: 'goneisii', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    const jackpot = (await (await call({ type: 2, data: { name: 'goneisii', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
     assert.match(jackpot, /^🎰 (🍒 \| ){2}🍒 🎰\nJACKPOT![\s\S]*\+100 kolikkoa \| saldo: \*\*100\*\*/u);
 
     let spin = 0;
     Math.random = () => [0, 0.21, 0][spin++];
-    const pair = (await (await call({ type: 2, data: { name: 'goneisii', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    const pair = (await (await call({ type: 2, data: { name: 'goneisii', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
     assert.match(pair, /^🎰 🍒 \| 🍋 \| 🍒 🎰\nclose ✨[\s\S]*\+10 kolikkoa \| saldo: \*\*110\*\*/u);
 
-    const balance = (await (await call({ type: 2, data: { name: 'kukkaro', options: [], member: { user: { id: 'player-1' } } } })).json()).data.content;
+    const balance = (await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'player-1' } } })).json()).data.content;
     assert.equal(balance, 'Sulla on **110** kolikkoa 🪙');
   } finally {
     Math.random = originalRandom;

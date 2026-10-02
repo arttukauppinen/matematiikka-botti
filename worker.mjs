@@ -54,7 +54,7 @@ export default {
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data } = JSON.parse(body);
+    const { type, data, member, user } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -70,13 +70,13 @@ export default {
       const matches = new Set(reels).size;
       const winnings = matches === 1 ? 100 : matches === 2 ? 10 : 0;
       const result = matches === 1 ? 'JACKPOT! 🎉' : matches === 2 ? 'close ✨' : 'ei voittoa';
-      const playerId = data.member?.user?.id ?? data.user?.id;
+      const playerId = (member?.user ?? user)?.id;
       if (!env.COINS || !playerId) return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}`);
       const balance = await addCoins(env.COINS, playerId, winnings);
       return reply(`🎰 ${reels.join(' | ')} 🎰\n${result}\n+${winnings} kolikkoa | saldo: **${balance}** 🪙`);
     }
     if (data.name === 'kukkaro') {
-      const playerId = data.member?.user?.id ?? data.user?.id;
+      const playerId = (member?.user ?? user)?.id;
       const balance = env.COINS && playerId ? +(await env.COINS.get(playerId) ?? 0) : 0;
       return reply(`Sulla on **${balance}** kolikkoa 🪙`);
     }
