@@ -115,38 +115,48 @@ export default {
     if (data.name === 'goneisii' || data.name === 'gruunavaiglaava') {
       const cost = data.name === 'goneisii' ? 3 : (o.panos ?? 1);
       if (store && coins < cost) return reply(`Ei tarpeeksi kolikkoja, tarvitset ${cost} 🪙 Nollasaldolla saat 10 ilmaista kerran päivässä.`, 64);
+      const signed = (n) => `${n < 0 ? '' : '+'}${n}`;
 
-      let text, net, reels;
-      if (data.name === 'goneisii') {
-        reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
+      if (data.name === 'gruunavaiglaava') {
+        const side = Math.random() < 0.5 ? 'kruuna' : 'klaava';
+        const net = side === o.valinta ? cost : -cost;
+        if (store) await store.put(playerId, `${coins + net} ${day ?? ''}`.trim());
+        return reply(store ? `🪙 ${side}\n${signed(net)} 🪙` : `🪙 ${side}`);
+      }
+
+      // ponytail: waitUntil lives max 30 s after the reply and each spin animates for 3 s, so autospin caps at 8 (also max_value in deploy.yml)
+      const total = Math.min(o.autospin ?? 1, 8);
+      const spins = [];
+      let bal = coins;
+      while (spins.length < total && !(store && bal < cost)) {
+        const reels = Array.from({ length: 3 }, () => fruits[Math.floor(Math.random() * fruits.length)]);
         const matches = new Set(reels).size;
         const shit = matches === 1 && reels[0] === '💀';
-        net = shit ? -cost - Math.ceil((coins - cost) * 0.7) : (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
+        const net = shit ? -cost - Math.ceil((bal - cost) * 0.7) : (matches === 1 ? 100 : matches === 2 ? 10 : 0) - cost;
         const verdict = shit ? `# ${LOSE} SHITPOT! ${LOSE}` : matches === 1 ? `# ${WIN} JACKPOT! ${WIN}` : matches === 2 ? 'close ✨' : 'ei voittoa';
-        text = `🎰 ${reels.join(' | ')} 🎰\n${verdict}`;
-      } else {
-        const side = Math.random() < 0.5 ? 'kruuna' : 'klaava';
-        net = side === o.valinta ? cost : -cost;
-        text = `🪙 ${side}`;
+        spins.push({ reels, before: bal - coins, text: `🎰 ${reels.join(' | ')} 🎰\n${verdict}${store ? `\n${signed(net)} 🪙` : ''}` });
+        bal += net;
       }
-      if (store) await store.put(playerId, `${coins + net} ${day ?? ''}`.trim());
-      const out = store ? `${text}\n${net < 0 ? '' : '+'}${net} 🪙` : text;
-      if (!reels) return reply(out);
+      if (store) await store.put(playerId, `${bal} ${day ?? ''}`.trim());
 
-      const frame = (n) => `🎰 ${reels.map((r, i) => (i < n ? r : SPIN)).join(' | ')} 🎰`;
+      const foot = (i, sum) => (total > 1 ? `\n🔁 ${i + 1}/${total}${store ? ` · yht. ${signed(sum)} 🪙` : ''}` : '');
+      const frame = (i, n) => `🎰 ${spins[i].reels.map((r, k) => (k < n ? r : SPIN)).join(' | ')} 🎰${foot(i, spins[i].before)}`;
+      const edits = spins.flatMap((s, i) => [frame(i, 1), frame(i, 2), s.text + foot(i, spins[i + 1]?.before ?? bal - coins)]);
       ctx.waitUntil(
         (async () => {
-          for (const content of [frame(1), frame(2), out]) {
-            await scheduler.wait(1000);
-            await fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+          let sent;
+          for (const content of edits) {
+            await Promise.all([scheduler.wait(1000), sent]);
+            sent = fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ content }),
             });
           }
+          await sent;
         })(),
       );
-      return reply(frame(0));
+      return reply(frame(0, 0));
     }
 
     const lo = Math.min(o.min ?? 1, o.max);

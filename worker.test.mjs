@@ -109,6 +109,43 @@ test('goneisii: rullat paljastuvat sekunnin välein', async () => {
   }
 });
 
+test('goneisii autospin: sama viesti, kierros ja yhteissumma, loppuu kun kolikot loppuu', async () => {
+  const originalRandom = Math.random;
+  const spin = async (id, autospin, randoms) => {
+    Math.random = () => randoms.shift();
+    const res = await call({ type: 2, application_id: 'app', token: 'tok', data: { name: 'goneisii', options: [{ name: 'autospin', value: autospin }] }, member: { user: { id } } });
+    const first = (await res.json()).data.content;
+    await Promise.all(pending.splice(0));
+    return [first, ...edits.splice(0).map(([, c]) => c)];
+  };
+  try {
+    balances.set('auto', '7');
+    const [first, ...rest] = await spin('auto', 3, [0, 0, 0.21, 0, 0.21, 0.41, 0, 0.21, 0.41]);
+    const s = first.match(/^🎰 (\S+) \|/u)[1];
+    assert.equal(first, `🎰 ${s} | ${s} | ${s} 🎰\n🔁 1/3 · yht. +0 🪙`);
+    assert.deepEqual(rest, [
+      `🎰 🍒 | ${s} | ${s} 🎰\n🔁 1/3 · yht. +0 🪙`,
+      `🎰 🍒 | 🍒 | ${s} 🎰\n🔁 1/3 · yht. +0 🪙`,
+      '🎰 🍒 | 🍒 | 🍋 🎰\nclose ✨\n+7 🪙\n🔁 1/3 · yht. +7 🪙',
+      `🎰 🍒 | ${s} | ${s} 🎰\n🔁 2/3 · yht. +7 🪙`,
+      `🎰 🍒 | 🍋 | ${s} 🎰\n🔁 2/3 · yht. +7 🪙`,
+      '🎰 🍒 | 🍋 | 🍉 🎰\nei voittoa\n-3 🪙\n🔁 2/3 · yht. +4 🪙',
+      `🎰 🍒 | ${s} | ${s} 🎰\n🔁 3/3 · yht. +4 🪙`,
+      `🎰 🍒 | 🍋 | ${s} 🎰\n🔁 3/3 · yht. +4 🪙`,
+      '🎰 🍒 | 🍋 | 🍉 🎰\nei voittoa\n-3 🪙\n🔁 3/3 · yht. +1 🪙',
+    ]);
+    assert.equal(balances.get('auto'), '8');
+
+    balances.set('broke', '4');
+    const frames = await spin('broke', 3, [0, 0.21, 0.41, 0, 0.21, 0.41]);
+    assert.equal(frames.length, 4);
+    assert.equal(frames.at(-1), '🎰 🍒 | 🍋 | 🍉 🎰\nei voittoa\n-3 🪙\n🔁 1/3 · yht. -3 🪙');
+    assert.equal(balances.get('broke'), '1');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
 test('leaderboard: palvelimen pelaajat tasattuna, rikkain ensin', async () => {
   const send = async (name, guild_id, member, randoms = [], ...options) => {
     Math.random = () => randoms.shift();
