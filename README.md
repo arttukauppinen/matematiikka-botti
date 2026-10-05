@@ -17,8 +17,10 @@ npx wrangler kv namespace create COINS
 Lisää komennon tulostama namespace `id` GitHub-repositorion Actions-salaisuuksiin nimellä `COINS_KV_NAMESPACE_ID`. Deploy-workflow käyttää tätä salaisuutta automaattisesti `COINS`-sidonnan luomiseen. Forkilla pitää olla oma Cloudflare KV -namespace ja omat salaisuudet; niitä ei kopioida alkuperäisestä repositoriosta.
 
 
-`/galastus` maksaa 3 kolikkoa syötistä. Odota, että kala tarttuu, ja paina napista nostaaksesi siiman. Saalis näyttää painon grammoina tai kilogrammoina ja myydään automaattisesti; painavampi kala antaa enemmän kolikoita. Kalalajeilla on eri harvinaisuudet ja hinnat, ja erittäin harvoin voi saada jättimäisen kalan. Siima voi myös katketa tai nostaa saaliiksi vanhan saappaan.
+`/galastus` maksaa 3 kolikkoa syötistä. Kala tarttuu satunnaisesti 2–20 sekunnin kuluttua, joten paina napista nostaaksesi siiman oikealla hetkellä. Saalis näyttää painon grammoina tai kilogrammoina ja myydään automaattisesti; painavampi kala antaa enemmän kolikoita. Kalalajeilla on eri harvinaisuudet ja hinnat, ja erittäin harvoin voi saada jättimäisen kalan. Siima voi myös katketa tai nostaa saaliiksi vanhan saappaan.
 
 `/verkko toiminto kesto` maksaa 20 kolikkoa. Valitse `heitä` ja aika 1–60 minuuttia, ja nosta verkko myöhemmin joko viestin napista tai valitsemalla `nosta`. Pidempi odotus tuottaa isomman saaliin, enintään 6 kalaa. Kalastustilastot näyttävät myös palvelimen suurimman kalan, saalismäärät ja harvinaisuudet.
 
 Kalastuksesta saa kokemusta ja taso nousee RuneScape-tyylisesti tasolle 99 asti. Kalastuksen tila tallennetaan samaan KV:hen kuin kolikot.
+
+`/kalastustaso` näyttää nykyisen kalastustason, kokemuksen ja kalojen avautumistasot. Kalat avautuvat tasoilla 1, 10, 25, 40, 60 ja 80; harvinaisemmat kalat antavat enemmän kokemusta.
