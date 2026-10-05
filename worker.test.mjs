@@ -203,7 +203,7 @@ test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
 test('galastus: syötti maksaa 3 ja onnistunut nosto myy kalan sekä antaa XP:tä', async () => {
   const originalRandom = Math.random;
   try {
-    const randoms = [0.2, 0, 0];
+    const randoms = [0.5, 0.2, 0, 0];
     Math.random = () => randoms.shift();
     const cast = await call({ type: 2, data: { name: 'galastus', options: [] }, member: { user: { id: 'fisher' } } });
     assert.equal((await cast.json()).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
@@ -214,6 +214,8 @@ test('galastus: syötti maksaa 3 ja onnistunut nosto myy kalan sekä antaa XP:t�
     assert.match((await caught.json()).data.content, /🐟 Sait \*\*ahven\*\* \(50 g, yleinen\)\n    💰 \*\*\+1\*\* 🪙\n    🎣 Kalastus LVL \*\*1\*\* \(\+20 XP\)/u);
     assert.equal((await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).json()).data.content, 'Sulla on **8** kolikkoa 🪙');
     assert.deepEqual(JSON.parse(balances.get('fishing:fisher')), { level: 1, xp: 20 });
+    const status = await call({ type: 2, data: { name: 'kalastustaso', options: [] }, member: { user: { id: 'fisher' } } });
+    assert.match((await status.json()).data.content, /🎣 Kalastus LVL \*\*1\*\* · \*\*20 XP\*\*[\s\S]*✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP[\s\S]*🔒 🐊 hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
   } finally {
     Math.random = originalRandom;
   }
