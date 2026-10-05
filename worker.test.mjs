@@ -199,3 +199,38 @@ test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
   for (let k = 0; k < 300; k++) seen.add(await roll({ name: 'max', value: 3 }, { name: 'min', value: 5 }));
   assert.deepEqual([...seen].sort(), [3, 4, 5]);
 });
+
+test('galastus: syötti maksaa 3 ja onnistunut nosto myy kalan sekä antaa XP:tä', async () => {
+  const originalRandom = Math.random;
+  try {
+    const randoms = [0.2, 0, 0];
+    Math.random = () => randoms.shift();
+    const cast = await call({ type: 2, data: { name: 'galastus', options: [] }, member: { user: { id: 'fisher' } } });
+    assert.equal((await cast.json()).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
+    assert.equal((await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).status, 200);
+    assert.equal((await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).json()).data.content, 'Sulla on **7** kolikkoa 🪙');
+    balances.set('fishing-pending:dm:fisher', JSON.stringify({ readyAt: 0, castAt: 0 }));
+    const caught = await call({ type: 3, data: { custom_id: 'galastus:catch' }, member: { user: { id: 'fisher' } } });
+    assert.match((await caught.json()).data.content, /🐟 Sait \*\*ahven\*\* \(50 g, yleinen\)\n    💰 \*\*\+1\*\* 🪙\n    🎣 Kalastus LVL \*\*1\*\* \(\+20 XP\)/u);
+    assert.equal((await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).json()).data.content, 'Sulla on **8** kolikkoa 🪙');
+    assert.deepEqual(JSON.parse(balances.get('fishing:fisher')), { level: 1, xp: 20 });
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('verkko: maksaa 20 ja noston slash-optio kerää verkon', async () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0;
+    balances.set('netter', '30');
+    await call({ type: 2, data: { name: 'verkko', options: [{ name: 'toiminto', value: 'heitä' }, { name: 'kesto', value: 1 }] }, member: { user: { id: 'netter' } } });
+    assert.equal(balances.get('netter'), '10');
+    balances.set('fishing-pending:dm:netter', JSON.stringify({ readyAt: 0, castAt: 0 }));
+    const raised = await call({ type: 2, data: { name: 'verkko', options: [{ name: 'toiminto', value: 'nosta' }] }, member: { user: { id: 'netter' } } });
+    assert.match((await raised.json()).data.content, /Verkossa oli \*\*6\*\* kalaa!/u);
+    assert.equal(balances.get('netter'), '16');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
