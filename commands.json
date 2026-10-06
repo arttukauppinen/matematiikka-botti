@@ -41,7 +41,7 @@
     "contexts": [0, 1, 2],
     "options": [
       { "type": 3, "name": "toiminto", "description": "heitä tai nosta", "required": true, "choices": [{ "name": "heitä", "value": "heitä" }, { "name": "nosta", "value": "nosta" }] },
-      { "type": 4, "name": "kesto", "description": "aika minuutteina, 1–60", "min_value": 1, "max_value": 60 }
+      { "type": 4, "name": "kesto", "description": "aika minuutteina 1–60, oletus 10; pidempi aika = isompi saalis", "min_value": 1, "max_value": 60 }
     ]
   },
   { "name": "kalastustaso", "description": "Näytä kalastustaso ja kalojen avautumisvaatimukset", "integration_types": [0, 1], "contexts": [0, 1, 2] },

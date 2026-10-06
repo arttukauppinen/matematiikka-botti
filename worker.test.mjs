@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import worker from './worker.mjs';
 
 const { publicKey, privateKey } = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
@@ -7,6 +8,7 @@ const balances = new Map();
 const coins = {
   get: async (key) => balances.get(key),
   put: async (key, value) => balances.set(key, value),
+  delete: async (key) => balances.delete(key),
   list: async ({ prefix }) => ({ keys: [...balances.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) }),
 };
 const env = { DISCORD_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('raw', publicKey)).toString('hex'), COINS: coins };
@@ -200,39 +202,129 @@ test('roll: min ≔ 1, min > max ⇒ swap, kattaa välin', async () => {
   assert.deepEqual([...seen].sort(), [3, 4, 5]);
 });
 
-test('galastus: syötti maksaa 3 ja onnistunut nosto myy kalan sekä antaa XP:tä', async () => {
+const press = async (id, custom_id, guild_id) => (await call({ type: 3, data: { custom_id }, guild_id, member: { user: { id } } })).json();
+const command = async (id, name, options = [], guild_id, username = id) => (await call({ type: 2, application_id: 'app', token: 'tok', data: { name, options }, guild_id, member: { user: { id, username } } })).json();
+const castNet = (kesto) => [{ name: 'toiminto', value: 'heitä' }, { name: 'kesto', value: kesto }];
+const raiseNetOption = [{ name: 'toiminto', value: 'nosta' }];
+// moves a cast net's timestamps so that it is ready now, keeping its chosen duration
+const netReady = (key) => {
+  const { castAt, readyAt } = JSON.parse(balances.get(key));
+  balances.set(key, JSON.stringify({ castAt: Date.now() - (readyAt - castAt), readyAt: Date.now() }));
+};
+
+test('galastus: syötti maksaa 3, vain heittäjä nostaa, myöhästyessä kala karkaa', async () => {
   const originalRandom = Math.random;
+  const rod = (readyAt) => balances.set('fishing-rod:dm:fisher', JSON.stringify({ castAt: readyAt - 5000, readyAt }));
   try {
-    const randoms = [0.5, 0.2, 0, 0];
+    const randoms = [0.5, 0.2, 0, 0, 0];
     Math.random = () => randoms.shift();
-    const cast = await call({ type: 2, data: { name: 'galastus', options: [] }, member: { user: { id: 'fisher' } } });
-    assert.equal((await cast.json()).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
-    assert.equal((await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).status, 200);
-    assert.equal((await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).json()).data.content, 'Sulla on **7** kolikkoa 🪙');
-    balances.set('fishing-pending:dm:fisher', JSON.stringify({ readyAt: 0, castAt: 0 }));
-    const caught = await call({ type: 3, data: { custom_id: 'galastus:catch' }, member: { user: { id: 'fisher' } } });
-    assert.match((await caught.json()).data.content, /🐟 Sait \*\*ahven\*\* \(50 g, yleinen\)\n    💰 \*\*\+1\*\* 🪙\n    🎣 Kalastus LVL \*\*1\*\* \(\+20 XP\)/u);
-    assert.equal((await (await call({ type: 2, data: { name: 'kukkaro', options: [] }, member: { user: { id: 'fisher' } } })).json()).data.content, 'Sulla on **8** kolikkoa 🪙');
+    waits.length = 0;
+    const cast = await command('fisher', 'galastus');
+    assert.equal(cast.data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
+    assert.deepEqual(cast.data.components[0].components[0], { type: 2, style: 1, custom_id: 'galastus:catch:fisher', label: 'Odota', disabled: true });
+    await Promise.all(pending.splice(0));
+    assert.deepEqual(edits.splice(0).map(([, content]) => content), ['🌊🎣 Siima on vedessä...\n🌊〰️🌊', '🌊🎣 Jotain liikahti vedessä...\n〰️🐟〰️', '🐟 Kala on kiinni! Nosta siima nyt!']);
+    assert.deepEqual(waits.splice(0), [1000, 1000, 9000]);
+    assert.equal((await command('fisher', 'kukkaro')).data.content, 'Sulla on **7** kolikkoa 🪙');
+    assert.equal((await command('fisher', 'galastus')).data.flags, 64);
+
+    rod(Date.now() + 60000);
+    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.flags, 64);
+    rod(Date.now() - 1000);
+    assert.equal((await press('stranger', 'galastus:catch:fisher')).data.flags, 64);
+    const caught = await press('fisher', 'galastus:catch:fisher');
+    assert.equal(caught.type, 7);
+    assert.equal(caught.data.content, '🐟 Sait **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)');
+    assert.equal(caught.data.embeds[0].image.url, 'https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-ahven.png');
+    assert.deepEqual(caught.data.components, []);
+    assert.equal((await command('fisher', 'kukkaro')).data.content, 'Sulla on **8** kolikkoa 🪙');
     assert.deepEqual(JSON.parse(balances.get('fishing:fisher')), { level: 1, xp: 20 });
-    const status = await call({ type: 2, data: { name: 'kalastustaso', options: [] }, member: { user: { id: 'fisher' } } });
-    assert.match((await status.json()).data.content, /🎣 Kalastus LVL \*\*1\*\* · \*\*20 XP\*\*[\s\S]*✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP[\s\S]*🔒 🐊 hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
+    assert.equal((await press('fisher', 'galastus:catch')).data.content, 'Tämä siima on jo nostettu.');
+
+    rod(Date.now() - 11000);
+    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.content, '🐟💨 Kala ehti karata! Nosta nopeammin ensi kerralla.');
+    assert.equal(balances.has('fishing-rod:dm:fisher'), false);
+    rod(Date.now() - 11000);
+    Math.random = () => 0;
+    assert.equal((await command('fisher', 'galastus')).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
+    await Promise.all(pending.splice(0));
+    edits.length = waits.length = 0;
+
+    const status = (await command('fisher', 'kalastustaso')).data.content;
+    assert.match(status, /^🎣 Kalastus LVL \*\*1\*\* · \*\*20 XP\*\* · LVL 2: 83 XP\n\n✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP\n/u);
+    assert.match(status, /🔒 🐊 hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
+    const names = [...status.matchAll(/^\S+ \S+ (\S+) \(/gmu)].map(([, name]) => name);
+    assert.equal(names.length, 7);
+    for (const name of names) assert.ok(existsSync(new URL(`emoji/fish-${name.normalize('NFD').replace(/\p{M}/gu, '')}.png`, import.meta.url)), name);
   } finally {
     Math.random = originalRandom;
   }
 });
 
-test('verkko: maksaa 20 ja noston slash-optio kerää verkon', async () => {
+test('verkko: maksaa 20, saalis kasvaa valitun ajan mukaan, vain heittäjä nostaa', async () => {
   const originalRandom = Math.random;
+  const key = 'fishing-pending:dm:netter';
   try {
     Math.random = () => 0;
-    balances.set('netter', '30');
-    await call({ type: 2, data: { name: 'verkko', options: [{ name: 'toiminto', value: 'heitä' }, { name: 'kesto', value: 1 }] }, member: { user: { id: 'netter' } } });
-    assert.equal(balances.get('netter'), '10');
-    balances.set('fishing-pending:dm:netter', JSON.stringify({ readyAt: 0, castAt: 0 }));
-    const raised = await call({ type: 2, data: { name: 'verkko', options: [{ name: 'toiminto', value: 'nosta' }] }, member: { user: { id: 'netter' } } });
-    assert.match((await raised.json()).data.content, /Verkossa oli \*\*6\*\* kalaa!/u);
-    assert.equal(balances.get('netter'), '16');
+    balances.set('netter', '100');
+    balances.set('fishing-rod:dm:netter', JSON.stringify({ castAt: 0, readyAt: Date.now() }));
+    assert.equal((await command('netter', 'verkko', raiseNetOption)).data.content, 'Sinulla ei ole verkkoa vedessä.');
+
+    const cast = await command('netter', 'verkko', castNet(60));
+    assert.equal(cast.data.content, '🕸️ Heitit verkon veteen **60 minuutiksi**. Nosta se myöhemmin tästä napista.');
+    assert.equal(cast.data.components[0].components[0].custom_id, 'verkko:raise:netter');
+    assert.equal(balances.get('netter'), '80');
+    assert.equal((await command('netter', 'verkko', castNet(5))).data.flags, 64);
+    const early = await command('netter', 'verkko', raiseNetOption);
+    assert.deepEqual([early.data.content, early.data.flags], ['Verkko on vielä vedessä. Nosta se noin **60 min** kuluttua.', 64]);
+
+    netReady(key);
+    assert.equal((await press('stranger', 'verkko:raise:netter')).data.flags, 64);
+    const raised = await press('netter', 'verkko:raise:netter');
+    assert.equal(raised.type, 7);
+    assert.equal(raised.data.content, `🕸️ Verkossa oli **6** kalaa!\n${Array(6).fill('🐟 ahven 50 g').join(' · ')}\n💰 **+6** 🪙 · 🎣 LVL **2** (+120 XP) ✨ Uusi taso!`);
+    assert.equal(balances.get('netter'), '86');
+    assert.equal(balances.has(key), false);
+    assert.equal((await press('netter', 'verkko:raise:netter')).data.flags, 64);
+
+    await command('netter', 'verkko', castNet(1));
+    netReady(key);
+    assert.match((await command('netter', 'verkko', raiseNetOption)).data.content, /^🕸️ Verkossa oli \*\*2\*\* kalaa!/u);
+    await command('netter', 'verkko', castNet(1));
+    netReady(key);
+    Math.random = () => 0.99;
+    assert.match((await command('netter', 'verkko', raiseNetOption)).data.content, /^🕸️ Verkossa oli \*\*3\*\* kalaa!/u);
   } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test('kalastus leaderboardissa: isoin kala ensin, tilastot kirjoitetaan kerran per nosto', async () => {
+  const originalRandom = Math.random;
+  const writes = [];
+  const put = coins.put;
+  coins.put = async (key, value) => (writes.push(key), put(key, value));
+  try {
+    Math.random = () => 0;
+    balances.set('f1', '50');
+    await command('f1', 'verkko', castNet(60), 'g5', 'Kalle');
+    netReady('fishing-pending:g5:f1');
+    await command('f1', 'verkko', raiseNetOption, 'g5', 'Kalle');
+    assert.equal(writes.filter((k) => k === 'fishing-stats:g5:f1').length, 1);
+
+    const randoms = [0.2, 0, 0.5, 0];
+    Math.random = () => randoms.shift();
+    balances.set('f2', '10');
+    await command('f2', 'kukkaro', [], 'g5', 'Pekka');
+    balances.set('fishing-rod:g5:f2', JSON.stringify({ castAt: Date.now() - 5000, readyAt: Date.now() }));
+    assert.equal((await press('f2', 'galastus:catch:f2', 'g5')).data.content, '🐟 Sait **ahven** (925 g, yleinen)\n💰 **+2** 🪙 · 🎣 LVL **1** (+20 XP)');
+
+    assert.equal(
+      (await command('f1', 'leaderboard', [], 'g5')).data.content,
+      '```\n 1  Kalle  36\n 2  Pekka  12\n```\n\n🎣 KALASTUS\n```\n 1  Pekka  LVL  1  1 kalaa  ennätys ahven 925 g  yleinen 1\n 2  Kalle  LVL  2  6 kalaa  ennätys ahven 50 g  yleinen 6\n```',
+    );
+  } finally {
+    coins.put = put;
     Math.random = originalRandom;
   }
 });

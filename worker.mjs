@@ -4,65 +4,70 @@ const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊', '💀'];
 const SPIN = '<a:slot_spin:1555491281000472646>';
 const WIN = '<a:jackpot:1555491279385792593>';
 const LOSE = WIN; // ponytail: same gif as jackpot until a shitpot gif is uploaded
+// chance = relative catch weight, value = price of an average-weight fish, level = fishing level that unlocks it
 const fish = [
-  ['ahven', '🐟', 'yleinen', 50, 1800, 2, 20, 42, 1, 'ahven'],
-  ['särki', '🐟', 'yleinen', 40, 1200, 2, 25, 25, 1, 'sarki'],
-  ['hauki', '🐊', 'epätavallinen', 500, 15000, 7, 70, 15, 10, 'hauki'],
-  ['kuha', '🐠', 'harvinainen', 500, 12000, 16, 130, 8, 25, 'kuha'],
-  ['lohi', '🐟', 'harvinainen', 1000, 20000, 27, 220, 6, 40, 'lohi'],
-  ['järvitaimen', '🐟', 'eeppinen', 500, 10000, 54, 400, 3, 60, 'jarvitaimen'],
-  ['monni', '🐡', 'legendaarinen', 5000, 50000, 250, 800, 1, 80, 'monni'],
+  { name: 'ahven', icon: '🐟', rarity: 'yleinen', min: 50, max: 1800, value: 2, xp: 20, chance: 42, level: 1 },
+  { name: 'särki', icon: '🐟', rarity: 'yleinen', min: 40, max: 1200, value: 2, xp: 25, chance: 25, level: 1 },
+  { name: 'hauki', icon: '🐊', rarity: 'epätavallinen', min: 500, max: 15000, value: 7, xp: 70, chance: 15, level: 10 },
+  { name: 'kuha', icon: '🐠', rarity: 'harvinainen', min: 500, max: 12000, value: 16, xp: 130, chance: 8, level: 25 },
+  { name: 'lohi', icon: '🐟', rarity: 'harvinainen', min: 1000, max: 20000, value: 27, xp: 220, chance: 6, level: 40 },
+  { name: 'järvitaimen', icon: '🐟', rarity: 'eeppinen', min: 500, max: 10000, value: 54, xp: 400, chance: 3, level: 60 },
+  { name: 'monni', icon: '🐡', rarity: 'legendaarinen', min: 5000, max: 50000, value: 250, xp: 800, chance: 1, level: 80 },
 ];
+const rarities = [...new Set(fish.map((f) => f.rarity))];
+const ESCAPE = 10000; // ms after the bite before the fish gets away
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
+// RuneScape XP table: xpFor[level] = total XP needed to reach that level
+const xpFor = [0, 0];
+for (let level = 1, sum = 0; level < 99; level++) xpFor.push(Math.floor((sum += Math.floor(level + 300 * 2 ** (level / 7))) / 4));
 const levelFor = (xp) => {
   let level = 1;
-  let needed = 0;
-  while (level < 99) {
-    needed += Math.floor(level + 300 * 2 ** (level / 7));
-    if (Math.floor(needed / 4) > xp) return level;
-    level++;
-  }
-  return 99;
+  while (level < 99 && xp >= xpFor[level + 1]) level++;
+  return level;
 };
 const fishingKey = (id) => `fishing:${id}`;
-const fishingStatsKey = (guild, id) => `fishing-stats:${guild}:${id}`;
-const pendingKey = (guild, id) => `fishing-pending:${guild ?? 'dm'}:${id}`;
-const fishingState = async (store, id) => JSON.parse((await store.get(fishingKey(id))) || '{"level":1,"xp":0}');
+const rodKey = (guild, id) => `fishing-rod:${guild ?? 'dm'}:${id}`;
+const netKey = (guild, id) => `fishing-pending:${guild ?? 'dm'}:${id}`; // old name kept so nets cast before the rod got its own key can still be raised
+const fishingState = async (store, id) => {
+  const { xp = 0 } = JSON.parse((await store.get(fishingKey(id))) || '{}');
+  return { xp, level: levelFor(xp) };
+};
 const pickFish = (level) => {
-  const available = fish.filter((entry) => entry[8] <= level);
-  let n = Math.random() * available.reduce((sum, entry) => sum + entry[7], 0);
-  return available.find((entry) => (n -= entry[7]) < 0) ?? available[0];
+  const pool = fish.filter((f) => f.level <= level);
+  let n = Math.random() * pool.reduce((sum, f) => sum + f.chance, 0);
+  return pool.find((f) => (n -= f.chance) < 0) ?? pool[0];
 };
 const catchFish = (level) => {
-  const [name, icon, rarity, min, max, baseValue, xp, , , imageName] = pickFish(level);
-  let weight = min + Math.random() * (max - min);
-  let giant = false;
-  if (Math.random() > 0.99) {
-    weight *= 2 + Math.random() * 2;
-    giant = true;
-  }
+  const f = pickFish(level);
+  let weight = f.min + Math.random() * (f.max - f.min);
+  const giant = Math.random() > 0.99;
+  if (giant) weight *= 2 + Math.random() * 2;
   weight = Math.round(weight);
-  const value = Math.max(1, Math.round(baseValue * weight / ((min + max) / 2)));
-  return { name, icon, rarity, weight, value, xp, giant, image: `https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-${imageName}.svg` };
+  const value = Math.max(1, Math.round((f.value * weight) / ((f.min + f.max) / 2)));
+  // Discord embeds can't show SVG, so the images are PNGs
+  const image = `https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-${f.name.normalize('NFD').replace(/\p{M}/gu, '')}.png`;
+  return { ...f, weight, giant, value, image };
 };
-const formatWeight = (weight) => weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`;
-const recordCatch = async (store, guild, id, caught) => {
-  if (!store || !guild) return;
-  const key = fishingStatsKey(guild, id);
-  const stats = JSON.parse((await store.get(key)) || '{"count":0,"xp":0,"biggest":null,"rarities":{}}');
-  stats.count++;
-  stats.xp += caught.xp;
-  stats.rarities[caught.rarity] = (stats.rarities[caught.rarity] ?? 0) + 1;
-  if (!stats.biggest || caught.weight > stats.biggest.weight) stats.biggest = { name: caught.name, weight: caught.weight };
-  await store.put(key, JSON.stringify(stats));
-};
-const fishingProgress = async (store, id, xpGain) => {
-  if (!store) return { level: levelFor(xpGain), xp: xpGain, gained: true };
-  const previous = await fishingState(store, id);
-  const xp = previous.xp + xpGain;
+const formatWeight = (weight) => (weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`);
+// Sells the catch and saves coins, XP and server stats. KV allows one write per second per key, so every key is written once.
+const land = async (store, guild, id, state, caught) => {
+  const [coins, day] = await walletOf(store, id);
+  const total = caught.reduce((sum, f) => sum + f.value, 0);
+  const xp = state.xp + caught.reduce((sum, f) => sum + f.xp, 0);
   const level = levelFor(xp);
+  await store.put(id, `${coins + total} ${day ?? ''}`.trim());
   await store.put(fishingKey(id), JSON.stringify({ level, xp }));
-  return { level, xp, gained: level > previous.level };
+  if (guild) {
+    const key = `fishing-stats:${guild}:${id}`;
+    const stats = JSON.parse((await store.get(key)) || '{"count":0,"biggest":null,"rarities":{}}');
+    for (const f of caught) {
+      stats.count++;
+      stats.rarities[f.rarity] = (stats.rarities[f.rarity] ?? 0) + 1;
+      if (!stats.biggest || f.weight > stats.biggest.weight) stats.biggest = { name: f.name, weight: f.weight };
+    }
+    await store.put(key, JSON.stringify(stats));
+  }
+  return `💰 **+${total}** 🪙 · 🎣 LVL **${level}** (+${xp - state.xp} XP)${level > state.level ? ' ✨ Uusi taso!' : ''}`;
 };
 const interactionUpdate = (content, components = [], embeds = []) => Response.json({ type: 7, data: { content, components, embeds } });
 const walletOf = async (store, playerId) => {
@@ -131,62 +136,47 @@ export default {
     }
     const playerId = (member?.user ?? user)?.id;
     const store = playerId && env.COINS;
+    // returns [flags, content]: 64 = nothing to raise yet, shown only to the player
     const raiseNet = async () => {
-      const key = pendingKey(guild_id, playerId);
-      const pending = JSON.parse((await store?.get(key)) || 'null');
-      if (!pending) return { content: 'Sinulla ei ole verkkoa vedessä.', components: [], flags: 64 };
-      if (Date.now() < pending.readyAt) {
-        const minutes = Math.ceil((pending.readyAt - Date.now()) / 60000);
-        return { content: `Verkko on vielä vedessä. Nosta se noin **${minutes} min** kuluttua.`, components: button('verkko:raise', 'Nosta verkko'), flags: 64 };
-      }
-      await store.put(key, '');
-      const [coins, day] = await walletOf(store, playerId);
-      const count = Math.min(6, 2 + Math.floor((Date.now() - pending.castAt) / 60000));
-      const fishing = await fishingState(store, playerId);
-      let total = 0;
-      let xp = 0;
-      const caught = [];
-      for (let i = 0; i < count; i++) {
-        const fishCaught = catchFish(fishing.level);
-        await recordCatch(store, guild_id, playerId, fishCaught);
-        total += fishCaught.value;
-        xp += fishCaught.xp;
-        caught.push(`${fishCaught.icon} ${fishCaught.name} ${formatWeight(fishCaught.weight)}`);
-      }
-      await store.put(playerId, `${coins + total} ${day ?? ''}`.trim());
-      const progress = await fishingProgress(store, playerId, xp);
-      return { content: `🕸️ Verkossa oli **${count}** kalaa!
-${caught.join(' · ')}
-💰 Myynti: **+${total}** 🪙 · 🎣 LVL **${progress.level}** (+${xp} XP)${progress.gained ? ' ✨ Uusi taso!' : ''}`, components: [] };
+      const key = netKey(guild_id, playerId);
+      const net = JSON.parse((await store?.get(key)) || 'null');
+      if (!net) return [64, 'Sinulla ei ole verkkoa vedessä.'];
+      if (Date.now() < net.readyAt) return [64, `Verkko on vielä vedessä. Nosta se noin **${Math.ceil((net.readyAt - Date.now()) / 60000)} min** kuluttua.`];
+      await store.delete(key);
+      // 2 fish + 1 per 15 min chosen, a partial 15 min is a chance of one more: 60 min = 6
+      const count = 2 + Math.floor(Math.round((net.readyAt - net.castAt) / 60000) / 15 + Math.random());
+      const state = await fishingState(store, playerId);
+      const caught = Array.from({ length: count }, () => catchFish(state.level));
+      const list = caught.map((f) => `${f.icon} ${f.name} ${formatWeight(f.weight)}${f.giant ? ' (jättiläinen)' : ''}`).join(' · ');
+      return [0, `🕸️ Verkossa oli **${count}** kalaa!\n${list}\n${await land(store, guild_id, playerId, state, caught)}`];
     };
 
-    if (type === 3 && data.custom_id === 'galastus:catch') {
-      const key = pendingKey(guild_id, playerId);
-      const pending = JSON.parse((await store?.get(key)) || 'null');
-      if (!pending) return interactionUpdate('Tämä siima on jo nostettu.', []);
-      if (Date.now() < pending.readyAt) return interactionUpdate('Liian aikaisin! Kala ei ole vielä kiinni. 🎣', button('galastus:catch', 'Odota'));
-      await store.put(key, '');
-      const [coins, day] = await walletOf(store, playerId);
+    if (type === 3) {
+      // buttons carry the id of the player who cast; older buttons without it belong to whoever clicks
+      const [game, , owner = playerId] = data.custom_id.split(':');
+      if (owner !== playerId) return reply('Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
+      if (game === 'verkko') {
+        const [flags, content] = await raiseNet();
+        return flags ? reply(content, flags) : interactionUpdate(content);
+      }
+      const key = rodKey(guild_id, playerId);
+      const rod = JSON.parse((await store?.get(key)) || 'null');
+      if (!rod) return interactionUpdate('Tämä siima on jo nostettu.');
+      if (Date.now() < rod.readyAt) return reply('Kala ei ole vielä kiinni, odota! 🎣', 64);
+      await store.delete(key);
+      if (Date.now() > rod.readyAt + ESCAPE) return interactionUpdate('🐟💨 Kala ehti karata! Nosta nopeammin ensi kerralla.');
       const outcome = Math.random();
       if (outcome < 0.08) {
+        const [coins, day] = await walletOf(store, playerId);
         const penalty = Math.min(5, coins);
         await store.put(playerId, `${coins - penalty} ${day ?? ''}`.trim());
-        return interactionUpdate(`💥 Siima katkesi! Menetit **${penalty}** 🪙`, []);
+        return interactionUpdate(`💥 Siima katkesi! Menetit **${penalty}** 🪙`);
       }
-      if (outcome < 0.16) return interactionUpdate('Sait saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾', []);
-      const fishing = await fishingState(store, playerId);
-      const fishCaught = catchFish(fishing.level);
-      await store.put(playerId, `${coins + fishCaught.value} ${day ?? ''}`.trim());
-      await recordCatch(store, guild_id, playerId, fishCaught);
-      const progress = await fishingProgress(store, playerId, fishCaught.xp);
-      return interactionUpdate(`${fishCaught.icon} Sait **${fishCaught.name}** (${formatWeight(fishCaught.weight)}, ${fishCaught.rarity}${fishCaught.giant ? ' jättiläinen' : ''})
-    💰 **+${fishCaught.value}** 🪙
-    🎣 Kalastus LVL **${progress.level}** (+${fishCaught.xp} XP)${progress.gained ? ' ✨ Uusi taso!' : ''}`, [], [{ title: fishCaught.name, image: { url: fishCaught.image } }]);
-    }
-
-    if (type === 3 && data.custom_id === 'verkko:raise') {
-      const result = await raiseNet();
-      return interactionUpdate(result.content, result.components);
+      if (outcome < 0.16) return interactionUpdate('Sait saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
+      const state = await fishingState(store, playerId);
+      const f = catchFish(state.level);
+      const content = `${f.icon} Sait **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
+      return interactionUpdate(content, [], [{ title: f.name, image: { url: f.image } }]);
     }
 
     if (data.name === 'leaderboard') {
@@ -203,33 +193,25 @@ ${caught.join(' · ')}
       const w = Math.max(...top.map(([n]) => n.length));
       const sw = Math.max(...top.map(([, c]) => String(c).length));
       const lines = top.map(([n, c], i) => `${String(i + 1).padStart(2)}  ${n.padEnd(w)}  ${String(c).padStart(sw)}`);
-      const fishing = await env.COINS.list({ prefix: `fishing-stats:${guild_id}:` });
-      if (!fishing.keys.length) return reply(`\`\`\`\n${lines.join('\n')}\n\`\`\``);
-      const fishRows = await Promise.all(fishing.keys.map(async ({ name: key }) => {
-        const id = key.split(':')[2];
-        const stats = JSON.parse((await env.COINS.get(key)) || '{"count":0,"xp":0,"biggest":null,"rarities":{}}');
-        const name = (await env.COINS.get(`g:${guild_id}:${id}`)) ?? id;
-        return { name: name.replace(/`/g, "'").slice(0, 16), level: levelFor(stats.xp), count: stats.count, biggest: stats.biggest, rarities: Object.entries(stats.rarities).map(([rarity, count]) => `${rarity} ${count}`).join(', ') };
-      }));
-      fishRows.sort((a, b) => (b.biggest?.weight ?? 0) - (a.biggest?.weight ?? 0));
-      const fishLines = fishRows.slice(0, 10).map((row, i) => `${String(i + 1).padStart(2)}  ${row.name} LVL ${row.level} · ${row.count} kalaa · ennätys ${row.biggest?.name ?? '-'} ${formatWeight(row.biggest?.weight ?? 0)} · ${row.rarities}`);
-      return reply(`\`\`\`\n${lines.join('\n')}\n\`\`\`\n\n🎣 KALASTUS\n\`\`\`\n${fishLines.join('\n')}\n\`\`\``);
-    }
-
-    if (data.name === 'kalastusleaderboard') {
-      if (!guild_id || !env.COINS) return reply('Kalastusleaderboard toimii vain palvelimella.', 64);
-      const { keys } = await env.COINS.list({ prefix: `fishing-stats:${guild_id}:` });
-      const rows = await Promise.all(keys.map(async ({ name: key }) => {
-        const id = key.split(':')[2];
-        const stats = JSON.parse((await env.COINS.get(key)) || '{"count":0,"xp":0,"biggest":null,"rarities":{}}');
-        const name = (await env.COINS.get(`g:${guild_id}:${id}`)) ?? id;
-        const rarities = Object.entries(stats.rarities).map(([rarity, count]) => `${rarity} ${count}`).join(', ');
-        return { name: name.replace(/`/g, "'").slice(0, 16), level: levelFor(stats.xp), count: stats.count, biggest: stats.biggest, rarities };
-      }));
-      if (!rows.length) return reply('Palvelimella ei ole vielä kalastajia.', 64);
-      rows.sort((a, b) => (b.biggest?.weight ?? 0) - (a.biggest?.weight ?? 0));
-      const lines = rows.slice(0, 10).map((row, i) => `${String(i + 1).padStart(2)}  ${row.name} LVL ${row.level} · ${row.count} kalaa · ennätys ${row.biggest?.name ?? '-'} ${formatWeight(row.biggest?.weight ?? 0)} · ${row.rarities}`);
-      return reply(`\`\`\`\n${lines.join('\n')}\n\`\`\``);
+      const board = `\`\`\`\n${lines.join('\n')}\n\`\`\``;
+      const fishers = (await env.COINS.list({ prefix: `fishing-stats:${guild_id}:` })).keys;
+      if (!fishers.length) return reply(board);
+      const fishRows = await Promise.all(
+        fishers.map(async ({ name: key }) => {
+          const id = key.split(':')[2];
+          const { count, biggest, rarities: caught } = JSON.parse(await env.COINS.get(key));
+          const name = ((await env.COINS.get(`g:${guild_id}:${id}`)) ?? id).replace(/`/g, "'").slice(0, 16);
+          const tiers = rarities.filter((r) => caught[r]).map((r) => `${r} ${caught[r]}`).join(', ');
+          return { name, level: (await fishingState(env.COINS, id)).level, count, biggest, tiers };
+        }),
+      );
+      const best = fishRows.sort((a, b) => b.biggest.weight - a.biggest.weight).slice(0, 10);
+      const fw = Math.max(...best.map((r) => r.name.length));
+      const cw = Math.max(...best.map((r) => String(r.count).length));
+      const fishLines = best.map(
+        (r, i) => `${String(i + 1).padStart(2)}  ${r.name.padEnd(fw)}  LVL ${String(r.level).padStart(2)}  ${String(r.count).padStart(cw)} kalaa  ennätys ${r.biggest.name} ${formatWeight(r.biggest.weight)}  ${r.tiers}`,
+      );
+      return reply(`${board}\n\n🎣 KALASTUS\n\`\`\`\n${fishLines.join('\n')}\n\`\`\``);
     }
 
     const mark = async (id, m, u) => {
@@ -244,52 +226,59 @@ ${caught.join(' · ')}
 
     if (data.name === 'kalastustaso') {
       if (!store) return reply('Kalastustaso vaatii käytössä olevan kolikkotallennuksen.', 64);
-      const fishing = await fishingState(store, playerId);
-      const available = fish.map(([name, icon, rarity, , , , xp, , required]) => `${required <= fishing.level ? '✅' : '🔒'} ${icon} ${name} (${rarity}): LVL ${required} · +${xp} XP`).join('\n');
-      return reply(`🎣 Kalastus LVL **${fishing.level}** · **${fishing.xp} XP**\n\n${available}`);
+      const { level, xp } = await fishingState(store, playerId);
+      const next = level < 99 ? ` · LVL ${level + 1}: ${xpFor[level + 1]} XP` : '';
+      const list = fish.map((f) => `${f.level <= level ? '✅' : '🔒'} ${f.icon} ${f.name} (${f.rarity}): LVL ${f.level} · +${f.xp} XP`).join('\n');
+      return reply(`🎣 Kalastus LVL **${level}** · **${xp} XP**${next}\n\n${list}`);
     }
 
     if (data.name === 'galastus') {
       if (!store) return reply('Kalastus vaatii käytössä olevan kolikkotallennuksen.', 64);
       const cost = 3;
-      if (store && coins < cost) return reply(`Ei tarpeeksi kolikoita, syötti maksaa ${cost} 🪙`, 64);
-      if (store && await store.get(pendingKey(guild_id, playerId))) return reply('Sinulla on jo siima vedessä.', 64);
+      if (coins < cost) return reply(`Ei tarpeeksi kolikoita, syötti maksaa ${cost} 🪙`, 64);
+      const key = rodKey(guild_id, playerId);
+      const old = JSON.parse((await store.get(key)) || 'null');
+      if (old && Date.now() <= old.readyAt + ESCAPE) return reply('Sinulla on jo siima vedessä.', 64);
+      const now = Date.now();
       const biteDelay = 2000 + Math.floor(Math.random() * 18000);
-      if (store) {
-        const now = Date.now();
-        await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
-        await store.put(pendingKey(guild_id, playerId), JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 3600 });
-      }
-      const edit = async (content, components) => fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, components }) });
-      ctx.waitUntil((async () => {
-        await scheduler.wait(1000);
-        await edit('🌊🎣 Siima on vedessä...\n🌊〰️🌊', button('galastus:catch', 'Odota', true));
-        await scheduler.wait(1000);
-        await edit('🌊🎣 Jotain liikahti vedessä...\n〰️🐟〰️', button('galastus:catch', 'Odota', true));
-        await scheduler.wait(biteDelay - 2000);
-        await edit('🐟 Kala on kiinni! Nosta siima nyt!', button('galastus:catch', 'Nosta kala'));
-      })());
-      return reply('🌊🎣 Heitit syötin veteen...\n〰️🌊〰️', undefined, button('galastus:catch', 'Odota', true));
+      await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
+      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 3600 });
+      const id = `galastus:catch:${playerId}`;
+      const edit = (content, components) =>
+        fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, components }),
+        });
+      // the button turns on only after readyAt; the longest bite (20 s) fits in the 30 s waitUntil limit
+      ctx.waitUntil(
+        (async () => {
+          await scheduler.wait(1000);
+          await edit('🌊🎣 Siima on vedessä...\n🌊〰️🌊', button(id, 'Odota', true));
+          await scheduler.wait(1000);
+          await edit('🌊🎣 Jotain liikahti vedessä...\n〰️🐟〰️', button(id, 'Odota', true));
+          await scheduler.wait(biteDelay - 2000);
+          await edit('🐟 Kala on kiinni! Nosta siima nyt!', button(id, 'Nosta kala'));
+        })(),
+      );
+      return reply('🌊🎣 Heitit syötin veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
     }
 
     if (data.name === 'verkko') {
-      const action = o.toiminto;
       if (!store) return reply('Verkkokalastus vaatii käytössä olevan kolikkotallennuksen.', 64);
-      const key = pendingKey(guild_id, playerId);
-      if (action === 'nosta') {
-        const result = await raiseNet();
-        return reply(result.content, result.flags, result.components);
+      if (o.toiminto === 'nosta') {
+        const [flags, content] = await raiseNet();
+        return reply(content, flags);
       }
       const cost = 20;
       const minutes = Math.min(Math.max(o.kesto ?? 10, 1), 60);
-      if (store && coins < cost) return reply(`Ei tarpeeksi kolikoita, verkko maksaa ${cost} 🪙`, 64);
-      if (store && await store.get(key)) return reply('Sinulla on jo verkko vedessä.', 64);
-      if (store) {
-        const now = Date.now();
-        await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
-        await store.put(key, JSON.stringify({ castAt: now, readyAt: now + minutes * 60000 }), { expirationTtl: 86400 });
-      }
-      return reply(`🕸️ Heitit verkon veteen **${minutes} minuutiksi**. Nosta se myöhemmin tästä napista.`, undefined, button('verkko:raise', 'Nosta verkko'));
+      if (coins < cost) return reply(`Ei tarpeeksi kolikoita, verkko maksaa ${cost} 🪙`, 64);
+      const key = netKey(guild_id, playerId);
+      if (await store.get(key)) return reply('Sinulla on jo verkko vedessä. Nosta se ensin: `/verkko nosta`', 64);
+      const now = Date.now();
+      await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
+      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + minutes * 60000 }), { expirationTtl: 86400 });
+      return reply(`🕸️ Heitit verkon veteen **${minutes} minuutiksi**. Nosta se myöhemmin tästä napista.`, undefined, button(`verkko:raise:${playerId}`, 'Nosta verkko'));
     }
 
     if (data.name === 'lainaa') {
