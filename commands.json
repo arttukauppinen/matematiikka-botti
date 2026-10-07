@@ -34,6 +34,7 @@
     ]
   },
   { "name": "galastus", "description": "Kalasta syötillä ja nosta kala oikealla hetkellä", "integration_types": [0, 1], "contexts": [0, 1, 2] },
+  { "name": "perho", "description": "Perhokalastus (LVL 10, 10 kolikkoa): usein tyhjää, mutta isompia kaloja ja 3× XP", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   {
     "name": "verkko",
     "description": "Heitä verkko veteen ja nosta se myöhemmin",

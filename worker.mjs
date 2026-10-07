@@ -16,6 +16,9 @@ const fish = [
 ];
 const rarities = [...new Set(fish.map((f) => f.rarity))];
 const ESCAPE = 10000; // ms after the bite before the fish gets away
+// /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit, and the fish gets away in 5 s
+const FLY_BITE = 23000;
+const FLY_ESCAPE = 5000;
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
 // RuneScape XP table: xpFor[level] = total XP needed to reach that level
 const xpFor = [0, 0];
@@ -27,26 +30,30 @@ const levelFor = (xp) => {
 };
 const fishingKey = (id) => `fishing:${id}`;
 const rodKey = (guild, id) => `fishing-rod:${guild ?? 'dm'}:${id}`;
+const flyKey = (guild, id) => `fishing-fly:${guild ?? 'dm'}:${id}`;
 const netKey = (guild, id) => `fishing-pending:${guild ?? 'dm'}:${id}`; // old name kept so nets cast before the rod got its own key can still be raised
 const fishingState = async (store, id) => {
   const { xp = 0 } = JSON.parse((await store.get(fishingKey(id))) || '{}');
   return { xp, level: levelFor(xp) };
 };
-const pickFish = (level) => {
+// fly: rarer species are likelier (√chance), fish skew heavier (√random) and give triple XP
+const pickFish = (level, fly) => {
   const pool = fish.filter((f) => f.level <= level);
-  let n = Math.random() * pool.reduce((sum, f) => sum + f.chance, 0);
-  return pool.find((f) => (n -= f.chance) < 0) ?? pool[0];
+  const odds = (f) => (fly ? Math.sqrt(f.chance) : f.chance);
+  let n = Math.random() * pool.reduce((sum, f) => sum + odds(f), 0);
+  return pool.find((f) => (n -= odds(f)) < 0) ?? pool[0];
 };
-const catchFish = (level) => {
-  const f = pickFish(level);
-  let weight = f.min + Math.random() * (f.max - f.min);
+const catchFish = (level, fly = false) => {
+  const f = pickFish(level, fly);
+  const r = Math.random();
+  let weight = f.min + (fly ? Math.sqrt(r) : r) * (f.max - f.min);
   const giant = Math.random() > 0.99;
   if (giant) weight *= 2 + Math.random() * 2;
   weight = Math.round(weight);
   const value = Math.max(1, Math.round((f.value * weight) / ((f.min + f.max) / 2)));
   // Discord embeds can't show SVG, so the images are PNGs
   const image = `https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-${f.name.normalize('NFD').replace(/\p{M}/gu, '')}.png`;
-  return { ...f, weight, giant, value, image };
+  return { ...f, weight, giant, value, image, xp: fly ? f.xp * 3 : f.xp };
 };
 const formatWeight = (weight) => (weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`);
 // Sells the catch and saves coins, XP and server stats. KV allows one write per second per key, so every key is written once.
@@ -159,6 +166,21 @@ export default {
         const [flags, content] = await raiseNet();
         return flags ? reply(content, flags) : interactionUpdate(content);
       }
+      if (game === 'perho') {
+        const key = flyKey(guild_id, playerId);
+        const cast = JSON.parse((await store?.get(key)) || 'null');
+        if (!cast) return interactionUpdate('Tämä perho on jo nostettu.');
+        if (Date.now() < cast.readyAt) return reply('Kala ei ole vielä iskenyt, odota! 🪰', 64);
+        await store.delete(key);
+        if (Date.now() > cast.readyAt + FLY_ESCAPE) return interactionUpdate('🐟💨 Kala ehti karata! Perhossa pitää olla nopea.');
+        const outcome = Math.random();
+        if (outcome < 0.25) return interactionUpdate('💥 Perho katkesi! Kala vei sen mukanaan.');
+        if (outcome < 0.5) return interactionUpdate('Perho nosti saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
+        const state = await fishingState(store, playerId);
+        const f = catchFish(state.level, true);
+        const content = `🪰 Sait perholla **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
+        return interactionUpdate(content, [], [{ title: f.name, image: { url: f.image } }]);
+      }
       const key = rodKey(guild_id, playerId);
       const rod = JSON.parse((await store?.get(key)) || 'null');
       if (!rod) return interactionUpdate('Tämä siima on jo nostettu.');
@@ -219,7 +241,7 @@ export default {
       const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
     };
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
@@ -262,6 +284,39 @@ export default {
         })(),
       );
       return reply('🌊🎣 Heitit syötin veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
+    }
+
+    if (data.name === 'perho') {
+      if (!store) return reply('Perhokalastus vaatii käytössä olevan kolikkotallennuksen.', 64);
+      const cost = 10;
+      const { level } = await fishingState(store, playerId);
+      if (level < 10) return reply(`🔒 Perhokalastus avautuu kalastustasolla 10, sinulla on LVL ${level}. Kalasta ensin \`/galastus\` tai \`/verkko\`.`, 64);
+      if (coins < cost) return reply(`Ei tarpeeksi kolikoita, perho maksaa ${cost} 🪙`, 64);
+      const key = flyKey(guild_id, playerId);
+      const old = JSON.parse((await store.get(key)) || 'null');
+      if (old && Date.now() <= old.readyAt + FLY_ESCAPE) return reply('Sinulla on jo perho vedessä.', 64);
+      const now = Date.now();
+      const biteDelay = 2000 + Math.floor(Math.random() * FLY_BITE);
+      await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
+      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 3600 });
+      const id = `perho:catch:${playerId}`;
+      const edit = (content, components) =>
+        fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, components }),
+        });
+      ctx.waitUntil(
+        (async () => {
+          await scheduler.wait(1000);
+          await edit('🪰🎣 Perho kelluu virrassa...\n🌊〰️🌊', button(id, 'Odota', true));
+          await scheduler.wait(1000);
+          await edit('🪰🎣 Jotain liikahti pinnan alla...\n〰️🐟〰️', button(id, 'Odota', true));
+          await scheduler.wait(biteDelay - 2000);
+          await edit('🐟 Kala iski perhoon! Nosta nopeasti!', button(id, 'Nosta kala'));
+        })(),
+      );
+      return reply('🪰🎣 Heitit perhon veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
     }
 
     if (data.name === 'verkko') {

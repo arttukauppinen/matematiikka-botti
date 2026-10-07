@@ -20,7 +20,9 @@ Lisää komennon tulostama namespace `id` GitHub-repositorion Actions-salaisuuks
 
 `/galastus` maksaa 3 kolikkoa syötistä. Kala tarttuu satunnaisesti 2–20 sekunnin kuluttua. Nosta siima napista 10 sekunnin sisällä, muuten kala karkaa. Vain heittäjä voi nostaa oman saaliinsa. Saalis näyttää painon grammoina tai kilogrammoina ja myydään automaattisesti; painavampi kala antaa enemmän kolikoita. Kalalajeilla on eri harvinaisuudet ja hinnat, ja erittäin harvoin voi saada jättimäisen kalan. Siima voi myös katketa tai nostaa saaliiksi vanhan saappaan.
 
-`/verkko toiminto kesto` maksaa 20 kolikkoa. Valitse `heitä` ja aika 1–60 minuuttia (oletus 10), ja nosta verkko ajan kuluttua joko viestin napista tai valitsemalla `nosta`. Verkossa on 2 kalaa ja yksi lisää jokaista valittua 15 minuuttia kohden (vajaa 15 minuuttia antaa mahdollisuuden yhteen lisäkalaan), eli 60 minuutilla 6 kalaa. Verkko ja onki voivat olla vedessä yhtä aikaa.
+`/perho` avautuu kalastustasolla 10 ja maksaa 10 kolikkoa. Kala iskee 2–25 sekunnin kuluttua, ja se pitää nostaa 5 sekunnin sisällä. Puolet nostoista on tyhjiä (perho katkeaa tai saaliina on saapas, ei lisämaksua), mutta harvinaisempia ja isompia kaloja tulee useammin kuin ongella, ja kaloista saa kolminkertaisen kokemuksen. Perho, onki ja verkko voivat olla vedessä yhtä aikaa.
+
+`/verkko toiminto kesto` maksaa 20 kolikkoa. Valitse `heitä` ja aika 1–60 minuuttia (oletus 10), ja nosta verkko ajan kuluttua joko viestin napista tai valitsemalla `nosta`. Verkossa on 2 kalaa ja yksi lisää jokaista valittua 15 minuuttia kohden (vajaa 15 minuuttia antaa mahdollisuuden yhteen lisäkalaan), eli 60 minuutilla 6 kalaa.
 
 Kalastuksesta saa kokemusta ja taso nousee RuneScape-tyylisesti tasolle 99 asti. Kalastuksen tila tallennetaan samaan KV:hen kuin kolikot.
 
