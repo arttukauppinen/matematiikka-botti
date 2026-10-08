@@ -17,7 +17,7 @@ const fish = [
 const rarities = [...new Set(fish.map((f) => f.rarity))];
 // /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit
 const FLY_BITE = 23000;
-// /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h), for double XP.
+// /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h). Rarer and heavier fish like perho, double XP.
 // Fish start dying 24 h after the last check, one more every 6 h.
 const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
@@ -37,24 +37,24 @@ const fishingState = async (store, id) => {
   const { xp = 0 } = JSON.parse((await store.get(fishingKey(id))) || '{}');
   return { xp, level: levelFor(xp) };
 };
-// fly: rarer species are likelier (√chance), fish skew heavier (√random) and give triple XP
-const pickFish = (level, fly) => {
+// rare (perho, gatiska): rarer species are likelier (√chance) and fish skew heavier (√random)
+const pickFish = (level, rare) => {
   const pool = fish.filter((f) => f.level <= level);
-  const odds = (f) => (fly ? Math.sqrt(f.chance) : f.chance);
+  const odds = (f) => (rare ? Math.sqrt(f.chance) : f.chance);
   let n = Math.random() * pool.reduce((sum, f) => sum + odds(f), 0);
   return pool.find((f) => (n -= odds(f)) < 0) ?? pool[0];
 };
-const catchFish = (level, fly = false) => {
-  const f = pickFish(level, fly);
+const catchFish = (level, rare = false, xpTimes = 1) => {
+  const f = pickFish(level, rare);
   const r = Math.random();
-  let weight = f.min + (fly ? Math.sqrt(r) : r) * (f.max - f.min);
+  let weight = f.min + (rare ? Math.sqrt(r) : r) * (f.max - f.min);
   const giant = Math.random() > 0.99;
   if (giant) weight *= 2 + Math.random() * 2;
   weight = Math.round(weight);
   const value = Math.max(1, Math.round((f.value * weight) / ((f.min + f.max) / 2)));
   // Discord embeds can't show SVG, so the images are PNGs
   const image = `https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-${f.name.normalize('NFD').replace(/\p{M}/gu, '')}.png`;
-  return { ...f, weight, giant, value, image, xp: fly ? f.xp * 3 : f.xp };
+  return { ...f, weight, giant, value, image, xp: f.xp * xpTimes };
 };
 const formatWeight = (weight) => (weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`);
 // Sells the catch and saves coins, XP and server stats. KV allows one write per second per key, so every key is written once.
@@ -177,7 +177,7 @@ export default {
         if (outcome < 0.25) return interactionUpdate('💥 Perho katkesi! Kala vei sen mukanaan.');
         if (outcome < 0.5) return interactionUpdate('Perho nosti saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
         const state = await fishingState(store, playerId);
-        const f = catchFish(state.level, true);
+        const f = catchFish(state.level, true, 3);
         const content = `🪰 Sait perholla **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
         return interactionUpdate(content, [], [{ title: f.name, image: { url: f.image } }]);
       }
@@ -343,10 +343,7 @@ export default {
         const fish = Math.min(TRAP.cap, Math.floor((end - t.checkedAt) / TRAP.every));
         const dead = Math.min(fish, Math.max(0, Math.ceil((now - t.checkedAt - TRAP.rot) / TRAP.dies)));
         const otter = fish > dead && Math.random() < 0.1 ? Math.ceil((fish - dead) / 2) : 0;
-        const got = Array.from({ length: fish - dead - otter }, () => {
-          const f = catchFish(state.level);
-          return { ...f, xp: f.xp * TRAP.xp };
-        });
+        const got = Array.from({ length: fish - dead - otter }, () => catchFish(state.level, true, TRAP.xp));
         caught.push(...got);
         // time toward the next fish carries over, unless the trap was full
         t.checkedAt = fish < TRAP.cap ? t.checkedAt + fish * TRAP.every : end;
