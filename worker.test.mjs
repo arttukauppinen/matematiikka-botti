@@ -385,3 +385,53 @@ test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja i
     Math.random = originalRandom;
   }
 });
+
+test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynnä 6 h:ssa, kuolevat 24 h jälkeen, saukko, 2× XP, ruostuu viikossa', async () => {
+  const originalRandom = Math.random;
+  const h = 36e5;
+  const buy = [{ name: 'toiminto', value: 'osta' }];
+  try {
+    balances.set('trapper', '2000');
+    balances.set('fishing:trapper', JSON.stringify({ level: 19, xp: 4469 }));
+    const locked = await command('trapper', 'gatiska', buy);
+    assert.deepEqual([locked.data.flags, balances.get('trapper')], [64, '2000']);
+
+    balances.set('fishing:trapper', JSON.stringify({ level: 20, xp: 4470 }));
+    assert.equal((await command('trapper', 'gatiska')).data.flags, 64);
+    assert.equal((await command('trapper', 'gatiska', buy)).data.content, '🪤 Laskit katiskan veteen (1/5). Se kerää kaloja viikon, kunnes ruostuu puhki. Katso katiskat: `/gatiska`');
+    for (let i = 0; i < 4; i++) await command('trapper', 'gatiska', buy);
+    assert.equal((await command('trapper', 'gatiska', buy)).data.flags, 64);
+    assert.equal(balances.get('trapper'), '500');
+    assert.equal((await command('trapper', 'gatiska')).data.content, `🪤 Katiskat\n${[1, 2, 3, 4, 5].map((i) => `#${i} (7 pv) tyhjä`).join('\n')}\nEi saalista tällä kertaa.`);
+
+    const now = Date.now();
+    const at = (bought, checked) => ({ boughtAt: now - bought, checkedAt: now - checked });
+    balances.set('fishing-traps:trapper', JSON.stringify([at(6 * h, 6 * h), at(3.5 * h, 3.5 * h), at(29 * h, 29 * h), at(8 * 24 * h, 29 * h), at(0, 0)]));
+    // per trap: otter roll, then pick/weight/giant per fish. #1 full, #2 3 fish, #3 1 dead + otter eats 3 of 5, #4 rusted with 5 fish, 1 dead
+    const roll = (otter, fish) => [otter, ...Array(fish * 3).fill(0)];
+    const randoms = [...roll(0.5, 6), ...roll(0.5, 3), ...roll(0.05, 2), ...roll(0.5, 4)];
+    Math.random = () => randoms.shift();
+    const ahven = (n) => Array(n).fill('🐟 ahven 50 g').join(' · ');
+    assert.equal(
+      (await command('trapper', 'gatiska')).data.content,
+      [
+        '🪤 Katiskat',
+        `#1 (7 pv) ${ahven(6)}`,
+        `#2 (7 pv) ${ahven(3)}`,
+        `#3 (6 pv) 💀 1 kuoli · 🦦 saukko söi 3 · ${ahven(2)}`,
+        `#4 ruostui puhki 🗑️ 💀 1 kuoli · ${ahven(4)}`,
+        '#5 (7 pv) tyhjä',
+        '💰 **+15** 🪙 · 🎣 LVL **21** (+600 XP) ✨ Uusi taso!',
+      ].join('\n'),
+    );
+    assert.equal(randoms.length, 0);
+    const left = JSON.parse(balances.get('fishing-traps:trapper'));
+    assert.equal(left.length, 4);
+    assert.equal(left[1].checkedAt, now - 0.5 * h);
+    assert.equal(balances.get('trapper'), '515');
+    assert.deepEqual(JSON.parse(balances.get('fishing:trapper')), { level: 21, xp: 5070 });
+    assert.match((await command('trapper', 'gatiska', buy)).data.content, /\(5\/5\)/u);
+  } finally {
+    Math.random = originalRandom;
+  }
+});

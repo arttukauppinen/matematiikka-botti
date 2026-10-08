@@ -24,6 +24,8 @@ Lisää komennon tulostama namespace `id` GitHub-repositorion Actions-salaisuuks
 
 `/verkko toiminto kesto` maksaa 20 kolikkoa. Valitse `heitä` ja aika 1–60 minuuttia (oletus 10), ja nosta verkko ajan kuluttua joko viestin napista tai valitsemalla `nosta`. Verkossa on 2 kalaa ja yksi lisää jokaista valittua 15 minuuttia kohden (vajaa 15 minuuttia antaa mahdollisuuden yhteen lisäkalaan), eli 60 minuutilla 6 kalaa.
 
+`/gatiska [toiminto]` avautuu kalastustasolla 20. `osta` laskee veteen uuden katiskan 300 kolikolla (enintään 5 kerrallaan), ja `katso` (oletus) kokee kaikki katiskat kerralla. Katiska saa kalan tunnin välein ja on täynnä 6 tunnissa (6 kalaa). Jos katiskaa ei koe 24 tuntiin, kaloja alkaa kuolla (yksi lisää 6 tunnin välein). Joka kokemisella saukko voi 10 %:n todennäköisyydellä syödä puolet katiskan saaliista. Katiskan kaloista saa kaksinkertaisen kokemuksen. Viikon jälkeen katiska ruostuu puhki, ja sen viimeiset kalat saa vielä seuraavalla kokemisella.
+
 Kalastuksesta saa kokemusta ja taso nousee RuneScape-tyylisesti tasolle 99 asti. Kalastuksen tila tallennetaan samaan KV:hen kuin kolikot.
 
 `/kalastustaso` näyttää nykyisen kalastustason, kokemuksen, seuraavan tason XP-rajan ja kalojen avautumistasot. Kalat avautuvat tasoilla 1, 10, 25, 40, 60 ja 80; harvinaisemmat kalat antavat enemmän kokemusta. `/leaderboard` näyttää kolikoiden lisäksi palvelimen kalastajat suurimman kalan mukaan, saalismäärät ja harvinaisuudet.

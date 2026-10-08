@@ -19,6 +19,9 @@ const ESCAPE = 10000; // ms after the bite before the fish gets away
 // /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit, and the fish gets away in 5 s
 const FLY_BITE = 23000;
 const FLY_ESCAPE = 5000;
+// /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h), for double XP.
+// Fish start dying 24 h after the last check, one more every 6 h.
+const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
 // RuneScape XP table: xpFor[level] = total XP needed to reach that level
 const xpFor = [0, 0];
@@ -241,7 +244,7 @@ export default {
       const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
     };
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
@@ -317,6 +320,46 @@ export default {
         })(),
       );
       return reply('🪰🎣 Heitit perhon veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
+    }
+
+    if (data.name === 'gatiska') {
+      if (!store) return reply('Katiskat vaativat käytössä olevan kolikkotallennuksen.', 64);
+      const state = await fishingState(store, playerId);
+      if (state.level < TRAP.level) return reply(`🔒 Katiskat avautuvat kalastustasolla ${TRAP.level}, sinulla on LVL ${state.level}.`, 64);
+      const key = `fishing-traps:${playerId}`;
+      const traps = JSON.parse((await store.get(key)) || '[]');
+      const now = Date.now();
+      const rusted = (t) => now >= t.boughtAt + TRAP.life;
+      if (o.toiminto === 'osta') {
+        const active = traps.filter((t) => !rusted(t)).length;
+        if (active >= TRAP.max) return reply(`Sinulla on jo ${TRAP.max} katiskaa vedessä.`, 64);
+        if (coins < TRAP.cost) return reply(`Ei tarpeeksi kolikoita, katiska maksaa ${TRAP.cost} 🪙`, 64);
+        traps.push({ boughtAt: now, checkedAt: now });
+        await store.put(playerId, `${coins - TRAP.cost} ${day ?? ''}`.trim());
+        await store.put(key, JSON.stringify(traps));
+        return reply(`🪤 Laskit katiskan veteen (${active + 1}/${TRAP.max}). Se kerää kaloja viikon, kunnes ruostuu puhki. Katso katiskat: \`/gatiska\``);
+      }
+      if (!traps.length) return reply(`Sinulla ei ole katiskoja. Osta: \`/gatiska toiminto:osta\` (${TRAP.cost} 🪙)`, 64);
+      const caught = [];
+      const lines = traps.map((t, i) => {
+        const end = Math.min(now, t.boughtAt + TRAP.life);
+        const fish = Math.min(TRAP.cap, Math.floor((end - t.checkedAt) / TRAP.every));
+        const dead = Math.min(fish, Math.max(0, Math.ceil((now - t.checkedAt - TRAP.rot) / TRAP.dies)));
+        const otter = fish > dead && Math.random() < 0.1 ? Math.ceil((fish - dead) / 2) : 0;
+        const got = Array.from({ length: fish - dead - otter }, () => {
+          const f = catchFish(state.level);
+          return { ...f, xp: f.xp * TRAP.xp };
+        });
+        caught.push(...got);
+        // time toward the next fish carries over, unless the trap was full
+        t.checkedAt = fish < TRAP.cap ? t.checkedAt + fish * TRAP.every : end;
+        const notes = [dead && `💀 ${dead} kuoli`, otter && `🦦 saukko söi ${otter}`, ...got.map((f) => `${f.icon} ${f.name} ${formatWeight(f.weight)}${f.giant ? ' (jättiläinen)' : ''}`)];
+        const life = rusted(t) ? 'ruostui puhki 🗑️' : `(${Math.ceil((t.boughtAt + TRAP.life - now) / 864e5)} pv)`;
+        return `#${i + 1} ${life} ${notes.filter(Boolean).join(' · ') || 'tyhjä'}`;
+      });
+      await store.put(key, JSON.stringify(traps.filter((t) => !rusted(t))));
+      const summary = caught.length ? await land(store, guild_id, playerId, state, caught) : 'Ei saalista tällä kertaa.';
+      return reply(`🪤 Katiskat\n${lines.join('\n')}\n${summary}`);
     }
 
     if (data.name === 'verkko') {
