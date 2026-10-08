@@ -15,10 +15,8 @@ const fish = [
   { name: 'monni', icon: '🐡', rarity: 'legendaarinen', min: 5000, max: 50000, value: 250, xp: 800, chance: 1, level: 80 },
 ];
 const rarities = [...new Set(fish.map((f) => f.rarity))];
-const ESCAPE = 10000; // ms after the bite before the fish gets away
-// /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit, and the fish gets away in 5 s
+// /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit
 const FLY_BITE = 23000;
-const FLY_ESCAPE = 5000;
 // /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h), for double XP.
 // Fish start dying 24 h after the last check, one more every 6 h.
 const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
@@ -175,7 +173,6 @@ export default {
         if (!cast) return interactionUpdate('Tämä perho on jo nostettu.');
         if (Date.now() < cast.readyAt) return reply('Kala ei ole vielä iskenyt, odota! 🪰', 64);
         await store.delete(key);
-        if (Date.now() > cast.readyAt + FLY_ESCAPE) return interactionUpdate('🐟💨 Kala ehti karata! Perhossa pitää olla nopea.');
         const outcome = Math.random();
         if (outcome < 0.25) return interactionUpdate('💥 Perho katkesi! Kala vei sen mukanaan.');
         if (outcome < 0.5) return interactionUpdate('Perho nosti saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
@@ -189,7 +186,6 @@ export default {
       if (!rod) return interactionUpdate('Tämä siima on jo nostettu.');
       if (Date.now() < rod.readyAt) return reply('Kala ei ole vielä kiinni, odota! 🎣', 64);
       await store.delete(key);
-      if (Date.now() > rod.readyAt + ESCAPE) return interactionUpdate('🐟💨 Kala ehti karata! Nosta nopeammin ensi kerralla.');
       const outcome = Math.random();
       if (outcome < 0.08) {
         const [coins, day] = await walletOf(store, playerId);
@@ -263,11 +259,12 @@ export default {
       if (coins < cost) return reply(`Ei tarpeeksi kolikoita, syötti maksaa ${cost} 🪙`, 64);
       const key = rodKey(guild_id, playerId);
       const old = JSON.parse((await store.get(key)) || 'null');
-      if (old && Date.now() <= old.readyAt + ESCAPE) return reply('Sinulla on jo siima vedessä.', 64);
+      // a hooked fish waits until it is raised; casting again after the bite gives it up, so a lost message can't lock the rod
+      if (old && Date.now() < old.readyAt) return reply('Sinulla on jo siima vedessä.', 64);
       const now = Date.now();
       const biteDelay = 2000 + Math.floor(Math.random() * 18000);
       await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
-      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 3600 });
+      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 86400 });
       const id = `galastus:catch:${playerId}`;
       const edit = (content, components) =>
         fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
@@ -297,11 +294,11 @@ export default {
       if (coins < cost) return reply(`Ei tarpeeksi kolikoita, perho maksaa ${cost} 🪙`, 64);
       const key = flyKey(guild_id, playerId);
       const old = JSON.parse((await store.get(key)) || 'null');
-      if (old && Date.now() <= old.readyAt + FLY_ESCAPE) return reply('Sinulla on jo perho vedessä.', 64);
+      if (old && Date.now() < old.readyAt) return reply('Sinulla on jo perho vedessä.', 64);
       const now = Date.now();
       const biteDelay = 2000 + Math.floor(Math.random() * FLY_BITE);
       await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
-      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 3600 });
+      await store.put(key, JSON.stringify({ castAt: now, readyAt: now + biteDelay }), { expirationTtl: 86400 });
       const id = `perho:catch:${playerId}`;
       const edit = (content, components) =>
         fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {

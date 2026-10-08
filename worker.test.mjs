@@ -212,7 +212,7 @@ const netReady = (key) => {
   balances.set(key, JSON.stringify({ castAt: Date.now() - (readyAt - castAt), readyAt: Date.now() }));
 };
 
-test('galastus: syötti maksaa 3, vain heittäjä nostaa, myöhästyessä kala karkaa', async () => {
+test('galastus: syötti maksaa 3, vain heittäjä nostaa, kala odottaa nostoa', async () => {
   const originalRandom = Math.random;
   const rod = (readyAt) => balances.set('fishing-rod:dm:fisher', JSON.stringify({ castAt: readyAt - 5000, readyAt }));
   try {
@@ -241,17 +241,21 @@ test('galastus: syötti maksaa 3, vain heittäjä nostaa, myöhästyessä kala k
     assert.deepEqual(JSON.parse(balances.get('fishing:fisher')), { level: 1, xp: 20 });
     assert.equal((await press('fisher', 'galastus:catch')).data.content, 'Tämä siima on jo nostettu.');
 
-    rod(Date.now() - 11000);
-    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.content, '🐟💨 Kala ehti karata! Nosta nopeammin ensi kerralla.');
+    // no time limit: a fish hooked 10 minutes ago is still there
+    rod(Date.now() - 10 * 60000);
+    const late = [0.2, 0, 0, 0];
+    Math.random = () => late.shift();
+    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.content, '🐟 Sait **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)');
     assert.equal(balances.has('fishing-rod:dm:fisher'), false);
-    rod(Date.now() - 11000);
+    // casting again after the bite gives up the hooked fish instead of locking the rod
+    rod(Date.now() - 1000);
     Math.random = () => 0;
     assert.equal((await command('fisher', 'galastus')).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
     await Promise.all(pending.splice(0));
     edits.length = waits.length = 0;
 
     const status = (await command('fisher', 'kalastustaso')).data.content;
-    assert.match(status, /^🎣 Kalastus LVL \*\*1\*\* · \*\*20 XP\*\* · LVL 2: 83 XP\n\n✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP\n/u);
+    assert.match(status, /^🎣 Kalastus LVL \*\*1\*\* · \*\*40 XP\*\* · LVL 2: 83 XP\n\n✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP\n/u);
     assert.match(status, /🔒 🐊 hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
     const names = [...status.matchAll(/^\S+ \S+ (\S+) \(/gmu)].map(([, name]) => name);
     assert.equal(names.length, 7);
@@ -329,7 +333,7 @@ test('kalastus leaderboardissa: isoin kala ensin, tilastot kirjoitetaan kerran p
   }
 });
 
-test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja isommat kalat, 3× XP, 5 s aikaa', async () => {
+test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja isommat kalat, 3× XP, kala odottaa nostoa', async () => {
   const originalRandom = Math.random;
   const fly = (readyAt) => balances.set('fishing-fly:dm:flyer', JSON.stringify({ castAt: readyAt - 5000, readyAt }));
   try {
@@ -378,9 +382,17 @@ test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja i
       Math.random = () => outcome;
       assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, content);
     }
-    fly(Date.now() - 6000);
-    assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, '🐟💨 Kala ehti karata! Perhossa pitää olla nopea.');
-    assert.equal(balances.get('flyer'), '24');
+    fly(Date.now() - 10 * 60000);
+    const late = [0.6, 0, 0, 0];
+    Math.random = () => late.shift();
+    assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, '🪰 Sait perholla **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **11** (+60 XP)');
+    assert.equal(balances.get('flyer'), '25');
+    fly(Date.now() - 1000);
+    Math.random = () => 0;
+    assert.equal((await command('flyer', 'perho')).data.content, '🪰🎣 Heitit perhon veteen...\n〰️🌊〰️');
+    await Promise.all(pending.splice(0));
+    edits.length = waits.length = 0;
+    assert.equal(balances.get('flyer'), '15');
   } finally {
     Math.random = originalRandom;
   }
