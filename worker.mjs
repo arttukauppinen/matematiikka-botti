@@ -20,6 +20,9 @@ const FLY_BITE = 23000;
 const FLY_COST = 8; // a boot gives the fly back, so only a snapped fly costs
 // /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h). Rarer and heavier fish like perho, double XP.
 // Fish start dying 24 h after the last check, one more every 6 h.
+// /guoma: a hired buddy casts the rod once a minute with the bait money you give him, a bit luckier than you.
+// With 10 % chance per hire he ends up in jail and the catch costs bail; the catch is paid out only when every cast is done.
+const KUOMA = { fee: 100, bait: 3, max: 300, every: 6e4, level: 30, skill: 0.75, jail: 0.1, bail: 100 };
 const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
 // RuneScape XP table: xpFor[level] = total XP needed to reach that level
@@ -38,17 +41,17 @@ const fishingState = async (store, id) => {
   const { xp = 0 } = JSON.parse((await store.get(fishingKey(id))) || '{}');
   return { xp, level: levelFor(xp) };
 };
-// rare (perho, gatiska): rarer species are likelier (√chance) and fish skew heavier (√random)
-const pickFish = (level, rare) => {
+// skill < 1 makes rarer species likelier (chance^skill) and fish heavier (random^skill): 0.5 for perho and gatiska, 0.75 for guoma
+const pickFish = (level, skill) => {
   const pool = fish.filter((f) => f.level <= level);
-  const odds = (f) => (rare ? Math.sqrt(f.chance) : f.chance);
+  const odds = (f) => f.chance ** skill;
   let n = Math.random() * pool.reduce((sum, f) => sum + odds(f), 0);
   return pool.find((f) => (n -= odds(f)) < 0) ?? pool[0];
 };
-const catchFish = (level, rare = false, xpTimes = 1) => {
-  const f = pickFish(level, rare);
+const catchFish = (level, skill = 1, xpTimes = 1) => {
+  const f = pickFish(level, skill);
   const r = Math.random();
-  let weight = f.min + (rare ? Math.sqrt(r) : r) * (f.max - f.min);
+  let weight = f.min + r ** skill * (f.max - f.min);
   const giant = Math.random() > 0.99;
   if (giant) weight *= 2 + Math.random() * 2;
   weight = Math.round(weight);
@@ -59,12 +62,12 @@ const catchFish = (level, rare = false, xpTimes = 1) => {
 const hero = (f, via) => `# ${f.icon} ${f.name[0].toUpperCase()}${f.name.slice(1)}\n-# ${[via, formatWeight(f.weight), f.rarity, f.giant && 'jättiläinen!'].filter(Boolean).join(' · ')}`;
 const formatWeight = (weight) => (weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`);
 // Sells the catch and saves coins, XP and server stats. KV allows one write per second per key, so every key is written once.
-const land = async (store, guild, id, state, caught) => {
+const land = async (store, guild, id, state, caught, cost = 0) => {
   const [coins, day] = await walletOf(store, id);
   const total = caught.reduce((sum, f) => sum + f.value, 0);
   const xp = state.xp + caught.reduce((sum, f) => sum + f.xp, 0);
   const level = levelFor(xp);
-  await store.put(id, `${coins + total} ${day ?? ''}`.trim());
+  await store.put(id, `${coins + total - cost} ${day ?? ''}`.trim());
   await store.put(fishingKey(id), JSON.stringify({ level, xp }));
   if (guild) {
     const key = `fishing-stats:${guild}:${id}`;
@@ -160,12 +163,62 @@ export default {
       return [0, `🕸️ Verkossa oli **${count}** kalaa!\n${list}\n${await land(store, guild_id, playerId, state, caught)}`];
     };
 
+    const duration = (ms) => {
+      const m = Math.ceil(ms / 6e4);
+      return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+    };
+    // rolls the casts made so far and stores them; pays out only when every cast is done. paying = the bail button was pressed
+    const kuomaReport = async (paying = false) => {
+      const key = `fishing-kuoma:${playerId}`;
+      const k = JSON.parse((await store?.get(key)) || 'null');
+      if (!k) return [64, `Sinulla ei ole kuomaa kalassa. Palkkaa: \`/guoma kolikot:${KUOMA.max}\` (palkkio ${KUOMA.fee} 🪙)`];
+      const due = Math.min(k.casts, Math.floor((Date.now() - k.start) / KUOMA.every));
+      const state = await fishingState(store, playerId);
+      for (; k.done < due; k.done++) {
+        const outcome = Math.random();
+        if (outcome < 0.08) k.snapped++;
+        else if (outcome < 0.16) k.boots++;
+        else {
+          const { name, rarity, weight, value, xp, giant } = catchFish(state.level, KUOMA.skill);
+          k.caught.push({ name, rarity, weight, value, xp, giant });
+        }
+      }
+      const caught = k.caught.map((c) => ({ ...fish.find((f) => f.name === c.name), ...c }));
+      const big = caught.reduce((a, f) => (!a || f.weight > a.weight ? f : a), null);
+      const species = fish.map((f) => [f.icon, caught.filter((c) => c.name === f.name).length]);
+      const tally = [...species, ['🥾', k.boots], ['💥', k.snapped]].filter(([, n]) => n).map(([icon, n]) => `${icon} ×${n}`).join(' · ');
+      const progress = `${k.done}/${k.casts}`;
+      if (k.done < k.casts) {
+        await store.put(key, JSON.stringify(k));
+        const best = big ? `\n-# suurin tähän asti: ${big.icon} ${big.name} ${formatWeight(big.weight)}` : '';
+        return [64, `🧔 Kuoma kalastaa: ${progress} heittoa, valmis noin ${duration(k.start + k.casts * KUOMA.every - Date.now())} kuluttua\n${tally || 'ei saalista vielä'}${best}`];
+      }
+      if (k.jail && !paying) {
+        await store.put(key, JSON.stringify(k));
+        return [0, `🚔 Kuoma onanoi laiturilla ja joutui putkaan. Maksa ${KUOMA.bail} 🪙 takuita lunastaaksesi saaliin.`, button(`guoma:bail:${playerId}`, `Maksa takuut (${KUOMA.bail} 🪙)`)];
+      }
+      if (k.jail && (await walletOf(store, playerId))[0] < KUOMA.bail) return [64, `Takuisiin tarvitaan ${KUOMA.bail} 🪙.`];
+      await store.delete(key);
+      const bail = k.jail ? KUOMA.bail : 0;
+      return [0, [
+        big ? hero(big, `🧔 kuoman saalis ${progress}`) : `🧔 Kuoman saalis ${progress}: ei kaloja`,
+        tally,
+        bail && `🚔 Takuut −${bail} 🪙`,
+        caught.length || bail ? await land(store, guild_id, playerId, state, caught, bail) : '',
+        '🧔 Kuoma käytti kaikki syötit ja lähti kotiin.',
+      ].filter(Boolean).join('\n')];
+    };
+
     if (type === 3) {
       // buttons carry the id of the player who cast; older buttons without it belong to whoever clicks
       const [game, , owner = playerId] = data.custom_id.split(':');
       if (owner !== playerId) return reply('Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
+        return flags ? reply(content, flags) : interactionUpdate(content);
+      }
+      if (game === 'guoma') {
+        const [flags, content] = await kuomaReport(true);
         return flags ? reply(content, flags) : interactionUpdate(content);
       }
       if (game === 'perho') {
@@ -182,7 +235,7 @@ export default {
           return interactionUpdate(`Perho nosti saaliiksi vanhan saappaan, mutta sait perhon takaisin: **+${FLY_COST}** 🪙 🥾`);
         }
         const state = await fishingState(store, playerId);
-        const f = catchFish(state.level, true, 3);
+        const f = catchFish(state.level, 0.5, 3);
         return interactionUpdate(`${hero(f, '🪰 perholla')}\n${await land(store, guild_id, playerId, state, [f])}`);
       }
       const key = rodKey(guild_id, playerId);
@@ -243,7 +296,7 @@ export default {
       const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
     };
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'guoma', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
@@ -322,6 +375,25 @@ export default {
       return reply('🪰🎣 Heitit perhon veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
     }
 
+    if (data.name === 'guoma') {
+      if (!store) return reply('Kuoma vaatii käytössä olevan kolikkotallennuksen.', 64);
+      const { level } = await fishingState(store, playerId);
+      if (level < KUOMA.level) return reply(`🔒 Kuoma lähtee kalaan kanssasi kalastustasolla ${KUOMA.level}, sinulla on LVL ${level}.`, 64);
+      if (o.kolikot === undefined) {
+        const [flags, content, components] = await kuomaReport();
+        return reply(content, flags, components);
+      }
+      const key = `fishing-kuoma:${playerId}`;
+      if (await store.get(key)) return reply('Kuoma on jo kalassa. Katso tilanne tai lunasta saalis: `/guoma`', 64);
+      const casts = Math.floor(Math.min(o.kolikot, KUOMA.max) / KUOMA.bait);
+      const cost = KUOMA.fee + casts * KUOMA.bait;
+      if (casts < 1) return reply(`Anna kuomalle syöttirahaa vähintään ${KUOMA.bait} 🪙.`, 64);
+      if (coins < cost) return reply(`Ei tarpeeksi kolikoita: palkkio ${KUOMA.fee} + syötit ${casts * KUOMA.bait} = ${cost} 🪙`, 64);
+      await store.put(playerId, `${coins - cost} ${day ?? ''}`.trim());
+      await store.put(key, JSON.stringify({ start: Date.now(), casts, done: 0, jail: Math.random() < KUOMA.jail, caught: [], boots: 0, snapped: 0 }));
+      return reply(`🧔 Palkkasit kuoman kalaan: ${casts} heittoa, noin ${duration(casts * KUOMA.every)}. Katso tilanne ja lunasta saalis lopuksi: \`/guoma\``);
+    }
+
     if (data.name === 'gatiska') {
       if (!store) return reply('Katiskat vaativat käytössä olevan kolikkotallennuksen.', 64);
       const state = await fishingState(store, playerId);
@@ -346,7 +418,7 @@ export default {
         const fish = Math.min(TRAP.cap, Math.floor((end - t.checkedAt) / TRAP.every));
         const dead = Math.min(fish, Math.max(0, Math.ceil((now - t.checkedAt - TRAP.rot) / TRAP.dies)));
         const otter = fish > dead && Math.random() < 0.1 ? Math.ceil((fish - dead) / 2) : 0;
-        const got = Array.from({ length: fish - dead - otter }, () => catchFish(state.level, true, TRAP.xp));
+        const got = Array.from({ length: fish - dead - otter }, () => catchFish(state.level, 0.5, TRAP.xp));
         caught.push(...got);
         // time toward the next fish carries over, unless the trap was full
         t.checkedAt = fish < TRAP.cap ? t.checkedAt + fish * TRAP.every : end;

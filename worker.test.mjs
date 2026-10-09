@@ -447,3 +447,68 @@ test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynn
     Math.random = originalRandom;
   }
 });
+
+test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, raportti kesken, maksu lopussa, putka ja takuut', async () => {
+  const originalRandom = Math.random;
+  const SARKI = '<:sarki:1558100882086961179>';
+  const hire = (id, kolikot) => command(id, 'guoma', [{ name: 'kolikot', value: kolikot }]);
+  const minutesAgo = (id, m) => {
+    const k = JSON.parse(balances.get(`fishing-kuoma:${id}`));
+    balances.set(`fishing-kuoma:${id}`, JSON.stringify({ ...k, start: Date.now() - m * 6e4 - 1000 }));
+  };
+  try {
+    balances.set('buddy', '1000');
+    balances.set('fishing:buddy', JSON.stringify({ level: 29, xp: 13362 }));
+    assert.equal((await hire('buddy', 300)).data.flags, 64);
+    balances.set('fishing:buddy', JSON.stringify({ level: 30, xp: 13363 }));
+    assert.equal((await command('buddy', 'guoma')).data.flags, 64);
+
+    Math.random = () => 0.5; // no jail this time
+    assert.equal((await hire('buddy', 301)).data.content, '🧔 Palkkasit kuoman kalaan: 100 heittoa, noin 1 h 40 min. Katso tilanne ja lunasta saalis lopuksi: `/guoma`');
+    assert.equal(balances.get('buddy'), '600');
+    assert.equal((await hire('buddy', 30)).data.flags, 64);
+    const start = await command('buddy', 'guoma');
+    assert.deepEqual([start.data.flags, start.data.content], [64, '🧔 Kuoma kalastaa: 0/100 heittoa, valmis noin 1 h 40 min kuluttua\nei saalista vielä']);
+
+    // 0.5 picks a särki with chance^0.75 at LVL 30 and 0.5^0.75 makes it 730 g
+    minutesAgo('buddy', 10);
+    const report = `🧔 Kuoma kalastaa: 10/100 heittoa, valmis noin 1 h 30 min kuluttua\n${SARKI} ×10\n-# suurin tähän asti: ${SARKI} särki 730 g`;
+    const mid = await command('buddy', 'guoma');
+    assert.deepEqual([mid.data.flags, mid.data.content], [64, report]);
+    assert.equal(balances.get('buddy'), '600');
+    // asking again doesn't roll the same casts again
+    Math.random = () => 0.1;
+    assert.equal((await command('buddy', 'guoma')).data.content, report);
+
+    minutesAgo('buddy', 500); // the other 90 casts are boots
+    const done = await command('buddy', 'guoma');
+    assert.equal(done.data.flags, 0);
+    assert.equal(done.data.content, `# ${SARKI} Särki\n-# 🧔 kuoman saalis 100/100 · 730 g · yleinen\n${SARKI} ×10 · 🥾 ×90\n💰 **+20** 🪙 · 🎣 LVL **30** (+250 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.`);
+    assert.equal(balances.get('buddy'), '620');
+    assert.equal(balances.has('fishing-kuoma:buddy'), false);
+
+    Math.random = () => 0.05; // jail, and every cast snaps
+    await hire('buddy', 15);
+    assert.equal(balances.get('buddy'), '505');
+    minutesAgo('buddy', 3);
+    assert.match((await command('buddy', 'guoma')).data.content, /^🧔 Kuoma kalastaa: 3\/5 heittoa, valmis noin 2 min kuluttua\n💥 ×3$/u);
+    minutesAgo('buddy', 10);
+    const jailed = await command('buddy', 'guoma');
+    assert.equal(jailed.data.content, '🚔 Kuoma onanoi laiturilla ja joutui putkaan. Maksa 100 🪙 takuita lunastaaksesi saaliin.');
+    assert.equal(jailed.data.components[0].components[0].custom_id, 'guoma:bail:buddy');
+    assert.equal((await press('stranger', 'guoma:bail:buddy')).data.flags, 64);
+    balances.set('buddy', '50');
+    assert.equal((await press('buddy', 'guoma:bail:buddy')).data.flags, 64);
+    balances.set('buddy', '505');
+    const bailed = await press('buddy', 'guoma:bail:buddy');
+    assert.equal(bailed.type, 7);
+    assert.equal(bailed.data.content, '🧔 Kuoman saalis 5/5: ei kaloja\n💥 ×5\n🚔 Takuut −100 🪙\n💰 **+0** 🪙 · 🎣 LVL **30** (+0 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.');
+    assert.equal(balances.get('buddy'), '405');
+    assert.equal(balances.has('fishing-kuoma:buddy'), false);
+    // a stale bail button doesn't charge again
+    assert.equal((await press('buddy', 'guoma:bail:buddy')).data.flags, 64);
+    assert.equal(balances.get('buddy'), '405');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
