@@ -34,7 +34,7 @@
     ]
   },
   { "name": "galastus", "description": "Kalasta syötillä ja nosta kala oikealla hetkellä", "integration_types": [0, 1], "contexts": [0, 1, 2] },
-  { "name": "perho", "description": "Perhokalastus (LVL 10, 10 kolikkoa): usein tyhjää, mutta isompia kaloja ja 3× XP", "integration_types": [0, 1], "contexts": [0, 1, 2] },
+  { "name": "perho", "description": "Perhokalastus (LVL 10, 8 kolikkoa): usein tyhjää, mutta isompia kaloja ja 3× XP", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   {
     "name": "gatiska",
     "description": "Katiskat (LVL 20): 300 kolikkoa, keräävät kaloja viikon, max 5",

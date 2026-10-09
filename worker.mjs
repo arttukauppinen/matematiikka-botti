@@ -17,6 +17,7 @@ const fish = [
 const rarities = [...new Set(fish.map((f) => f.rarity))];
 // /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit
 const FLY_BITE = 23000;
+const FLY_COST = 8; // a boot gives the fly back, so only a snapped fly costs
 // /gatiska: an owned trap lasts 7 days and holds 6 fish, one an hour (full in 6 h). Rarer and heavier fish like perho, double XP.
 // Fish start dying 24 h after the last check, one more every 6 h.
 const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
@@ -175,7 +176,11 @@ export default {
         await store.delete(key);
         const outcome = Math.random();
         if (outcome < 0.25) return interactionUpdate('💥 Perho katkesi! Kala vei sen mukanaan.');
-        if (outcome < 0.5) return interactionUpdate('Perho nosti saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
+        if (outcome < 0.5) {
+          const [coins, day] = await walletOf(store, playerId);
+          await store.put(playerId, `${coins + FLY_COST} ${day ?? ''}`.trim());
+          return interactionUpdate(`Perho nosti saaliiksi vanhan saappaan, mutta sait perhon takaisin: **+${FLY_COST}** 🪙 🥾`);
+        }
         const state = await fishingState(store, playerId);
         const f = catchFish(state.level, true, 3);
         const content = `🪰 Sait perholla **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
@@ -288,7 +293,7 @@ export default {
 
     if (data.name === 'perho') {
       if (!store) return reply('Perhokalastus vaatii käytössä olevan kolikkotallennuksen.', 64);
-      const cost = 10;
+      const cost = FLY_COST;
       const { level } = await fishingState(store, playerId);
       if (level < 10) return reply(`🔒 Perhokalastus avautuu kalastustasolla 10, sinulla on LVL ${level}. Kalasta ensin \`/galastus\` tai \`/verkko\`.`, 64);
       if (coins < cost) return reply(`Ei tarpeeksi kolikoita, perho maksaa ${cost} 🪙`, 64);

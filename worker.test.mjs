@@ -333,7 +333,7 @@ test('kalastus leaderboardissa: isoin kala ensin, tilastot kirjoitetaan kerran p
   }
 });
 
-test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja isommat kalat, 3× XP, kala odottaa nostoa', async () => {
+test('perho: avautuu tasolla 10, maksaa 8, saapas palauttaa perhon, puolet tyhjää, harvinaisemmat ja isommat kalat, 3× XP, kala odottaa nostoa', async () => {
   const originalRandom = Math.random;
   const fly = (readyAt) => balances.set('fishing-fly:dm:flyer', JSON.stringify({ castAt: readyAt - 5000, readyAt }));
   try {
@@ -352,12 +352,12 @@ test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja i
     await Promise.all(pending.splice(0));
     assert.deepEqual(edits.splice(0).map(([, content]) => content), ['🪰🎣 Perho kelluu virrassa...\n🌊〰️🌊', '🪰🎣 Jotain liikahti pinnan alla...\n〰️🐟〰️', '🐟 Kala iski perhoon! Nosta nopeasti!']);
     assert.deepEqual(waits.splice(0), [1000, 1000, 11500]);
-    assert.equal(balances.get('flyer'), '20');
+    assert.equal(balances.get('flyer'), '22');
     assert.equal((await command('flyer', 'perho')).data.flags, 64);
     assert.equal((await command('flyer', 'galastus')).data.content, '🌊🎣 Heitit syötin veteen...\n〰️🌊〰️');
     await Promise.all(pending.splice(0));
     edits.length = waits.length = 0;
-    assert.equal(balances.get('flyer'), '17');
+    assert.equal(balances.get('flyer'), '19');
 
     fly(Date.now() + 60000);
     assert.equal((await press('flyer', 'perho:catch:flyer')).data.flags, 64);
@@ -371,12 +371,12 @@ test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja i
     assert.equal(caught.data.content, '🪰 Sait perholla **hauki** (7,75 kg, epätavallinen)\n💰 **+7** 🪙 · 🎣 LVL **11** (+210 XP) ✨ Uusi taso!');
     assert.equal(caught.data.embeds[0].image.url, 'https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-hauki.png');
     assert.deepEqual(JSON.parse(balances.get('fishing:flyer')), { level: 11, xp: 1364 });
-    assert.equal(balances.get('flyer'), '24');
+    assert.equal(balances.get('flyer'), '26');
     assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, 'Tämä perho on jo nostettu.');
 
     for (const [outcome, content] of [
       [0.1, '💥 Perho katkesi! Kala vei sen mukanaan.'],
-      [0.3, 'Perho nosti saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾'],
+      [0.3, 'Perho nosti saaliiksi vanhan saappaan, mutta sait perhon takaisin: **+8** 🪙 🥾'],
     ]) {
       fly(Date.now() - 1000);
       Math.random = () => outcome;
@@ -386,13 +386,13 @@ test('perho: avautuu tasolla 10, maksaa 10, puolet tyhjää, harvinaisemmat ja i
     const late = [0.6, 0, 0, 0];
     Math.random = () => late.shift();
     assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, '🪰 Sait perholla **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **11** (+60 XP)');
-    assert.equal(balances.get('flyer'), '25');
+    assert.equal(balances.get('flyer'), '35');
     fly(Date.now() - 1000);
     Math.random = () => 0;
     assert.equal((await command('flyer', 'perho')).data.content, '🪰🎣 Heitit perhon veteen...\n〰️🌊〰️');
     await Promise.all(pending.splice(0));
     edits.length = waits.length = 0;
-    assert.equal(balances.get('flyer'), '15');
+    assert.equal(balances.get('flyer'), '27');
   } finally {
     Math.random = originalRandom;
   }
