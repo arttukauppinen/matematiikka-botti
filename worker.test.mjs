@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import worker from './worker.mjs';
 
 const { publicKey, privateKey } = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
@@ -32,6 +31,9 @@ const settle = async (res) => {
   await Promise.all(pending.splice(0));
   return edits.length ? { ...d, content: edits.splice(0).at(-1)[1] } : d;
 };
+
+const AHVEN = '<:ahven:1558100883550503013>';
+const HAUKI = '<:hauki:1558100885014323292>';
 
 const roll = async (...options) => +(await (await call({ type: 2, data: { options } })).json()).data.content.split(' ')[1];
 
@@ -234,8 +236,8 @@ test('galastus: syötti maksaa 3, vain heittäjä nostaa, kala odottaa nostoa', 
     assert.equal((await press('stranger', 'galastus:catch:fisher')).data.flags, 64);
     const caught = await press('fisher', 'galastus:catch:fisher');
     assert.equal(caught.type, 7);
-    assert.equal(caught.data.content, '🐟 Sait **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)');
-    assert.equal(caught.data.embeds[0].image.url, 'https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-ahven.png');
+    assert.equal(caught.data.content, `# ${AHVEN} Ahven\n-# 50 g · yleinen\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)`);
+    assert.equal(caught.data.embeds, undefined);
     assert.deepEqual(caught.data.components, []);
     assert.equal((await command('fisher', 'kukkaro')).data.content, 'Sulla on **8** kolikkoa 🪙');
     assert.deepEqual(JSON.parse(balances.get('fishing:fisher')), { level: 1, xp: 20 });
@@ -245,7 +247,7 @@ test('galastus: syötti maksaa 3, vain heittäjä nostaa, kala odottaa nostoa', 
     rod(Date.now() - 10 * 60000);
     const late = [0.2, 0, 0, 0];
     Math.random = () => late.shift();
-    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.content, '🐟 Sait **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)');
+    assert.equal((await press('fisher', 'galastus:catch:fisher')).data.content, `# ${AHVEN} Ahven\n-# 50 g · yleinen\n💰 **+1** 🪙 · 🎣 LVL **1** (+20 XP)`);
     assert.equal(balances.has('fishing-rod:dm:fisher'), false);
     // casting again after the bite gives up the hooked fish instead of locking the rod
     rod(Date.now() - 1000);
@@ -255,11 +257,9 @@ test('galastus: syötti maksaa 3, vain heittäjä nostaa, kala odottaa nostoa', 
     edits.length = waits.length = 0;
 
     const status = (await command('fisher', 'kalastustaso')).data.content;
-    assert.match(status, /^🎣 Kalastus LVL \*\*1\*\* · \*\*40 XP\*\* · LVL 2: 83 XP\n\n✅ 🐟 ahven \(yleinen\): LVL 1 · \+20 XP\n/u);
-    assert.match(status, /🔒 🐊 hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
-    const names = [...status.matchAll(/^\S+ \S+ (\S+) \(/gmu)].map(([, name]) => name);
-    assert.equal(names.length, 7);
-    for (const name of names) assert.ok(existsSync(new URL(`emoji/fish-${name.normalize('NFD').replace(/\p{M}/gu, '')}.png`, import.meta.url)), name);
+    assert.match(status, /^🎣 Kalastus LVL \*\*1\*\* · \*\*40 XP\*\* · LVL 2: 83 XP\n\n✅ <:ahven:1558100883550503013> ahven \(yleinen\): LVL 1 · \+20 XP\n/u);
+    assert.match(status, /🔒 <:hauki:1558100885014323292> hauki \(epätavallinen\): LVL 10 · \+70 XP/u);
+    assert.equal(status.match(/^(✅|🔒) <:\w+:\d{17,20}> /gmu).length, 7);
   } finally {
     Math.random = originalRandom;
   }
@@ -286,7 +286,7 @@ test('verkko: maksaa 20, saalis kasvaa valitun ajan mukaan, vain heittäjä nost
     assert.equal((await press('stranger', 'verkko:raise:netter')).data.flags, 64);
     const raised = await press('netter', 'verkko:raise:netter');
     assert.equal(raised.type, 7);
-    assert.equal(raised.data.content, `🕸️ Verkossa oli **6** kalaa!\n${Array(6).fill('🐟 ahven 50 g').join(' · ')}\n💰 **+6** 🪙 · 🎣 LVL **2** (+120 XP) ✨ Uusi taso!`);
+    assert.equal(raised.data.content, `🕸️ Verkossa oli **6** kalaa!\n${Array(6).fill(`${AHVEN} ahven 50 g`).join(' · ')}\n💰 **+6** 🪙 · 🎣 LVL **2** (+120 XP) ✨ Uusi taso!`);
     assert.equal(balances.get('netter'), '86');
     assert.equal(balances.has(key), false);
     assert.equal((await press('netter', 'verkko:raise:netter')).data.flags, 64);
@@ -321,7 +321,7 @@ test('kalastus leaderboardissa: isoin kala ensin, tilastot kirjoitetaan kerran p
     balances.set('f2', '10');
     await command('f2', 'kukkaro', [], 'g5', 'Pekka');
     balances.set('fishing-rod:g5:f2', JSON.stringify({ castAt: Date.now() - 5000, readyAt: Date.now() }));
-    assert.equal((await press('f2', 'galastus:catch:f2', 'g5')).data.content, '🐟 Sait **ahven** (925 g, yleinen)\n💰 **+2** 🪙 · 🎣 LVL **1** (+20 XP)');
+    assert.equal((await press('f2', 'galastus:catch:f2', 'g5')).data.content, `# ${AHVEN} Ahven\n-# 925 g · yleinen\n💰 **+2** 🪙 · 🎣 LVL **1** (+20 XP)`);
 
     assert.equal(
       (await command('f1', 'leaderboard', [], 'g5')).data.content,
@@ -368,8 +368,7 @@ test('perho: avautuu tasolla 10, maksaa 8, saapas palauttaa perhon, puolet tyhj�
     Math.random = () => randoms.shift();
     const caught = await press('flyer', 'perho:catch:flyer');
     assert.equal(caught.type, 7);
-    assert.equal(caught.data.content, '🪰 Sait perholla **hauki** (7,75 kg, epätavallinen)\n💰 **+7** 🪙 · 🎣 LVL **11** (+210 XP) ✨ Uusi taso!');
-    assert.equal(caught.data.embeds[0].image.url, 'https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-hauki.png');
+    assert.equal(caught.data.content, `# ${HAUKI} Hauki\n-# 🪰 perholla · 7,75 kg · epätavallinen\n💰 **+7** 🪙 · 🎣 LVL **11** (+210 XP) ✨ Uusi taso!`);
     assert.deepEqual(JSON.parse(balances.get('fishing:flyer')), { level: 11, xp: 1364 });
     assert.equal(balances.get('flyer'), '26');
     assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, 'Tämä perho on jo nostettu.');
@@ -385,7 +384,7 @@ test('perho: avautuu tasolla 10, maksaa 8, saapas palauttaa perhon, puolet tyhj�
     fly(Date.now() - 10 * 60000);
     const late = [0.6, 0, 0, 0];
     Math.random = () => late.shift();
-    assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, '🪰 Sait perholla **ahven** (50 g, yleinen)\n💰 **+1** 🪙 · 🎣 LVL **11** (+60 XP)');
+    assert.equal((await press('flyer', 'perho:catch:flyer')).data.content, `# ${AHVEN} Ahven\n-# 🪰 perholla · 50 g · yleinen\n💰 **+1** 🪙 · 🎣 LVL **11** (+60 XP)`);
     assert.equal(balances.get('flyer'), '35');
     fly(Date.now() - 1000);
     Math.random = () => 0;
@@ -424,13 +423,13 @@ test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynn
     // #2's first fish: 0.78 would be a särki with the rod's odds, √chance makes it a hauki and √0.25 puts it mid-range
     const randoms = [...roll(0.5, 6), 0.5, 0.78, 0.25, 0, 0, 0, 0, 0, 0, 0, ...roll(0.05, 2), ...roll(0.5, 4)];
     Math.random = () => randoms.shift();
-    const ahven = (n) => Array(n).fill('🐟 ahven 50 g').join(' · ');
+    const ahven = (n) => Array(n).fill(`${AHVEN} ahven 50 g`).join(' · ');
     assert.equal(
       (await command('trapper', 'gatiska')).data.content,
       [
         '🪤 Katiskat',
         `#1 (7 pv) ${ahven(6)}`,
-        `#2 (7 pv) 🐊 hauki 7,75 kg · ${ahven(2)}`,
+        `#2 (7 pv) ${HAUKI} hauki 7,75 kg · ${ahven(2)}`,
         `#3 (6 pv) 💀 1 kuoli · 🦦 saukko söi 3 · ${ahven(2)}`,
         `#4 ruostui puhki 🗑️ 💀 1 kuoli · ${ahven(4)}`,
         '#5 (7 pv) tyhjä',

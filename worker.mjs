@@ -4,15 +4,15 @@ const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊', '💀'];
 const SPIN = '<a:slot_spin:1555491281000472646>';
 const WIN = '<a:jackpot:1555491279385792593>';
 const LOSE = WIN; // ponytail: same gif as jackpot until a shitpot gif is uploaded
-// chance = relative catch weight, value = price of an average-weight fish, level = fishing level that unlocks it
+// icon = the app's emoji (Developer Portal → Emojis), chance = relative catch weight, value = price of an average-weight fish, level = fishing level that unlocks it
 const fish = [
-  { name: 'ahven', icon: '🐟', rarity: 'yleinen', min: 50, max: 1800, value: 2, xp: 20, chance: 42, level: 1 },
-  { name: 'särki', icon: '🐟', rarity: 'yleinen', min: 40, max: 1200, value: 2, xp: 25, chance: 25, level: 1 },
-  { name: 'hauki', icon: '🐊', rarity: 'epätavallinen', min: 500, max: 15000, value: 7, xp: 70, chance: 15, level: 10 },
-  { name: 'kuha', icon: '🐠', rarity: 'harvinainen', min: 500, max: 12000, value: 16, xp: 130, chance: 8, level: 25 },
-  { name: 'lohi', icon: '🐟', rarity: 'harvinainen', min: 1000, max: 20000, value: 27, xp: 220, chance: 6, level: 40 },
-  { name: 'järvitaimen', icon: '🐟', rarity: 'eeppinen', min: 500, max: 10000, value: 54, xp: 400, chance: 3, level: 60 },
-  { name: 'monni', icon: '🐡', rarity: 'legendaarinen', min: 5000, max: 50000, value: 250, xp: 800, chance: 1, level: 80 },
+  { name: 'ahven', icon: '<:ahven:1558100883550503013>', rarity: 'yleinen', min: 50, max: 1800, value: 2, xp: 20, chance: 42, level: 1 },
+  { name: 'särki', icon: '<:sarki:1558100882086961179>', rarity: 'yleinen', min: 40, max: 1200, value: 2, xp: 25, chance: 25, level: 1 },
+  { name: 'hauki', icon: '<:hauki:1558100885014323292>', rarity: 'epätavallinen', min: 500, max: 15000, value: 7, xp: 70, chance: 15, level: 10 },
+  { name: 'kuha', icon: '<:kuha:1558100880761557033>', rarity: 'harvinainen', min: 500, max: 12000, value: 16, xp: 130, chance: 8, level: 25 },
+  { name: 'lohi', icon: '<:lohi:1558100879440224336>', rarity: 'harvinainen', min: 1000, max: 20000, value: 27, xp: 220, chance: 6, level: 40 },
+  { name: 'järvitaimen', icon: '<:taimen:1558100878026604585>', rarity: 'eeppinen', min: 500, max: 10000, value: 54, xp: 400, chance: 3, level: 60 },
+  { name: 'monni', icon: '<:monni:1558100876621516881>', rarity: 'legendaarinen', min: 5000, max: 50000, value: 250, xp: 800, chance: 1, level: 80 },
 ];
 const rarities = [...new Set(fish.map((f) => f.rarity))];
 // /perho: bites within 2–25 s because the bite edit must fit in the 30 s waitUntil limit
@@ -53,10 +53,10 @@ const catchFish = (level, rare = false, xpTimes = 1) => {
   if (giant) weight *= 2 + Math.random() * 2;
   weight = Math.round(weight);
   const value = Math.max(1, Math.round((f.value * weight) / ((f.min + f.max) / 2)));
-  // Discord embeds can't show SVG, so the images are PNGs
-  const image = `https://raw.githubusercontent.com/arttukauppinen/matematiikka-botti/main/emoji/fish-${f.name.normalize('NFD').replace(/\p{M}/gu, '')}.png`;
-  return { ...f, weight, giant, value, image, xp: f.xp * xpTimes };
+  return { ...f, weight, giant, value, xp: f.xp * xpTimes };
 };
+// a single catch as a headline: the emoji renders large in a # heading, the details go in -# subtext
+const hero = (f, via) => `# ${f.icon} ${f.name[0].toUpperCase()}${f.name.slice(1)}\n-# ${[via, formatWeight(f.weight), f.rarity, f.giant && 'jättiläinen!'].filter(Boolean).join(' · ')}`;
 const formatWeight = (weight) => (weight < 1000 ? `${weight} g` : `${(weight / 1000).toFixed(2).replace('.', ',')} kg`);
 // Sells the catch and saves coins, XP and server stats. KV allows one write per second per key, so every key is written once.
 const land = async (store, guild, id, state, caught) => {
@@ -78,7 +78,7 @@ const land = async (store, guild, id, state, caught) => {
   }
   return `💰 **+${total}** 🪙 · 🎣 LVL **${level}** (+${xp - state.xp} XP)${level > state.level ? ' ✨ Uusi taso!' : ''}`;
 };
-const interactionUpdate = (content, components = [], embeds = []) => Response.json({ type: 7, data: { content, components, embeds } });
+const interactionUpdate = (content, components = []) => Response.json({ type: 7, data: { content, components } });
 const walletOf = async (store, playerId) => {
   const [coins, day] = ((await store.get(playerId)) ?? '0').split(' ');
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Helsinki' });
@@ -183,8 +183,7 @@ export default {
         }
         const state = await fishingState(store, playerId);
         const f = catchFish(state.level, true, 3);
-        const content = `🪰 Sait perholla **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
-        return interactionUpdate(content, [], [{ title: f.name, image: { url: f.image } }]);
+        return interactionUpdate(`${hero(f, '🪰 perholla')}\n${await land(store, guild_id, playerId, state, [f])}`);
       }
       const key = rodKey(guild_id, playerId);
       const rod = JSON.parse((await store?.get(key)) || 'null');
@@ -201,8 +200,7 @@ export default {
       if (outcome < 0.16) return interactionUpdate('Sait saaliiksi vanhan saappaan. Ei kolikoita tällä kertaa. 🥾');
       const state = await fishingState(store, playerId);
       const f = catchFish(state.level);
-      const content = `${f.icon} Sait **${f.name}** (${formatWeight(f.weight)}, ${f.rarity}${f.giant ? ', jättiläinen!' : ''})\n${await land(store, guild_id, playerId, state, [f])}`;
-      return interactionUpdate(content, [], [{ title: f.name, image: { url: f.image } }]);
+      return interactionUpdate(`${hero(f)}\n${await land(store, guild_id, playerId, state, [f])}`);
     }
 
     if (data.name === 'leaderboard') {
