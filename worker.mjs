@@ -22,7 +22,7 @@ const FLY_COST = 8; // a boot gives the fly back, so only a snapped fly costs
 // Fish start dying 24 h after the last check, one more every 6 h.
 // /guoma: a hired buddy casts the rod once a minute with the bait money you give him, a bit luckier than you.
 // With 10 % chance per hire he ends up in jail and the catch costs bail; the catch is paid out only when every cast is done.
-const KUOMA = { fee: 100, bait: 3, max: 300, every: 6e4, level: 30, skill: 0.75, jail: 0.1, bail: 100 };
+const KUOMA = { fee: 100, bait: 3, max: 300, every: 6e4, level: 30, skill: 0.75, jail: 0.1, bail: 500 };
 const TRAP = { cost: 300, max: 5, level: 20, life: 7 * 864e5, every: 36e5, cap: 6, xp: 2, rot: 24 * 36e5, dies: 6 * 36e5 };
 const button = (custom_id, label, disabled = false) => [{ type: 1, components: [{ type: 2, style: 1, custom_id, label, disabled }] }];
 // RuneScape XP table: xpFor[level] = total XP needed to reach that level
@@ -417,7 +417,7 @@ export default {
         const end = Math.min(now, t.boughtAt + TRAP.life);
         const fish = Math.min(TRAP.cap, Math.floor((end - t.checkedAt) / TRAP.every));
         const dead = Math.min(fish, Math.max(0, Math.ceil((now - t.checkedAt - TRAP.rot) / TRAP.dies)));
-        const otter = fish > dead && Math.random() < 0.1 ? Math.ceil((fish - dead) / 2) : 0;
+        const otter = fish > dead && Math.random() < 0.1 ? fish - dead : 0; // the otter eats the whole catch
         const got = Array.from({ length: fish - dead - otter }, () => catchFish(state.level, 0.5, TRAP.xp));
         caught.push(...got);
         // time toward the next fish carries over, unless the trap was full

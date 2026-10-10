@@ -418,10 +418,10 @@ test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynn
     const now = Date.now();
     const at = (bought, checked) => ({ boughtAt: now - bought, checkedAt: now - checked });
     balances.set('fishing-traps:trapper', JSON.stringify([at(6 * h, 6 * h), at(3.5 * h, 3.5 * h), at(29 * h, 29 * h), at(8 * 24 * h, 29 * h), at(0, 0)]));
-    // per trap: otter roll, then pick/weight/giant per fish. #1 full, #2 3 fish, #3 1 dead + otter eats 3 of 5, #4 rusted with 5 fish, 1 dead
+    // per trap: otter roll, then pick/weight/giant per fish. #1 full, #2 3 fish, #3 1 dead + otter eats the other 5, #4 rusted with 5 fish, 1 dead
     const roll = (otter, fish) => [otter, ...Array(fish * 3).fill(0)];
     // #2's first fish: 0.78 would be a särki with the rod's odds, √chance makes it a hauki and √0.25 puts it mid-range
-    const randoms = [...roll(0.5, 6), 0.5, 0.78, 0.25, 0, 0, 0, 0, 0, 0, 0, ...roll(0.05, 2), ...roll(0.5, 4)];
+    const randoms = [...roll(0.5, 6), 0.5, 0.78, 0.25, 0, 0, 0, 0, 0, 0, 0, ...roll(0.05, 0), ...roll(0.5, 4)];
     Math.random = () => randoms.shift();
     const ahven = (n) => Array(n).fill(`${AHVEN} ahven 50 g`).join(' · ');
     assert.equal(
@@ -430,18 +430,18 @@ test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynn
         '🪤 Katiskat',
         `#1 (7 pv) ${ahven(6)}`,
         `#2 (7 pv) ${HAUKI} hauki 7,75 kg · ${ahven(2)}`,
-        `#3 (6 pv) 💀 1 kuoli · 🦦 saukko söi 3 · ${ahven(2)}`,
+        '#3 (6 pv) 💀 1 kuoli · 🦦 saukko söi 5',
         `#4 ruostui puhki 🗑️ 💀 1 kuoli · ${ahven(4)}`,
         '#5 (7 pv) tyhjä',
-        '💰 **+21** 🪙 · 🎣 LVL **21** (+700 XP) ✨ Uusi taso!',
+        '💰 **+19** 🪙 · 🎣 LVL **21** (+620 XP) ✨ Uusi taso!',
       ].join('\n'),
     );
     assert.equal(randoms.length, 0);
     const left = JSON.parse(balances.get('fishing-traps:trapper'));
     assert.equal(left.length, 4);
     assert.equal(left[1].checkedAt, now - 0.5 * h);
-    assert.equal(balances.get('trapper'), '521');
-    assert.deepEqual(JSON.parse(balances.get('fishing:trapper')), { level: 21, xp: 5170 });
+    assert.equal(balances.get('trapper'), '519');
+    assert.deepEqual(JSON.parse(balances.get('fishing:trapper')), { level: 21, xp: 5090 });
     assert.match((await command('trapper', 'gatiska', buy)).data.content, /\(5\/5\)/u);
   } finally {
     Math.random = originalRandom;
@@ -494,7 +494,7 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
     assert.match((await command('buddy', 'guoma')).data.content, /^🧔 Kuoma kalastaa: 3\/5 heittoa, valmis noin 2 min kuluttua\n💥 ×3$/u);
     minutesAgo('buddy', 10);
     const jailed = await command('buddy', 'guoma');
-    assert.equal(jailed.data.content, '🚔 Kuoma onanoi laiturilla ja joutui putkaan. Maksa 100 🪙 takuita lunastaaksesi saaliin.');
+    assert.equal(jailed.data.content, '🚔 Kuoma onanoi laiturilla ja joutui putkaan. Maksa 500 🪙 takuita lunastaaksesi saaliin.');
     assert.equal(jailed.data.components[0].components[0].custom_id, 'guoma:bail:buddy');
     assert.equal((await press('stranger', 'guoma:bail:buddy')).data.flags, 64);
     balances.set('buddy', '50');
@@ -502,12 +502,12 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
     balances.set('buddy', '505');
     const bailed = await press('buddy', 'guoma:bail:buddy');
     assert.equal(bailed.type, 7);
-    assert.equal(bailed.data.content, '🧔 Kuoman saalis 5/5: ei kaloja\n💥 ×5\n🚔 Takuut −100 🪙\n💰 **+0** 🪙 · 🎣 LVL **30** (+0 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.');
-    assert.equal(balances.get('buddy'), '405');
+    assert.equal(bailed.data.content, '🧔 Kuoman saalis 5/5: ei kaloja\n💥 ×5\n🚔 Takuut −500 🪙\n💰 **+0** 🪙 · 🎣 LVL **30** (+0 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.');
+    assert.equal(balances.get('buddy'), '5');
     assert.equal(balances.has('fishing-kuoma:buddy'), false);
     // a stale bail button doesn't charge again
     assert.equal((await press('buddy', 'guoma:bail:buddy')).data.flags, 64);
-    assert.equal(balances.get('buddy'), '405');
+    assert.equal(balances.get('buddy'), '5');
   } finally {
     Math.random = originalRandom;
   }
