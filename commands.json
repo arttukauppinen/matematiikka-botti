@@ -59,6 +59,13 @@
       { "type": 4, "name": "kesto", "description": "aika minuutteina 1–60, oletus 10; pidempi aika = isompi saalis", "min_value": 1, "max_value": 60 }
     ]
   },
+  {
+    "name": "blackjack",
+    "description": "Blackjack jakajaa vastaan napeilla: blackjack maksaa 3:2",
+    "integration_types": [0, 1],
+    "contexts": [0, 1, 2],
+    "options": [{ "type": 4, "name": "panos", "description": "panos 1–500", "required": true, "min_value": 1, "max_value": 500 }]
+  },
   { "name": "kalastustaso", "description": "Näytä kalastustaso ja kalojen avautumisvaatimukset", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   { "name": "kukkaro", "description": "Näytä kolikkosaldosi", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   { "name": "leaderboard", "description": "Palvelimen rikkaimmat pelaajat", "integration_types": [0, 1], "contexts": [0] },

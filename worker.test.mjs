@@ -513,3 +513,97 @@ test('guoma: avautuu tasolla 30, ilmainen, maksat syötit, pitää myyntirahat, 
     Math.random = originalRandom;
   }
 });
+
+test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain pelaajan napit', async () => {
+  const originalRandom = Math.random;
+  const ids = { sa: '1558909376989892668', ck: '1558909456283209910', cq: '1558909455259934802', cj: '1558909458678022276', h10: '1558909419243184278', s9: '1558909382891405424', c10: '1558909475342123159', d6: '1558909447126913135', h2: '1558909418140213370', sk: '1558909379384967311', h5: '1558909414361272485', s6: '1558909387152691200', d7: '1558909445612896406', ha: '1558909406924509254', s8: '1558909384199770203', d8: '1558909444107272302' };
+  const E = (...cards) => cards.map((c) => `<:${c}:${ids[c]}>`).join(' ');
+  const FLIP = '<a:kortti_flip:1558909401430229092>';
+  const BACK = '<:kortti_selka:1558909399299522630>';
+  const table = (dealer, player, bottom) => `-# JAKAJA${dealer[1] === '' ? '' : ` · ${dealer[1]}`}\n# ${dealer[0]}\n-# SINÄ${player[1] === '' ? '' : ` · ${player[1]}`}\n# ${player[0]}\n${bottom}`;
+  const labels = (msg) => msg.data.components[0].components.map((b) => [b.label, b.disabled ?? false]);
+  const deal = async (panos) => command('dealer', 'blackjack', [{ name: 'panos', value: panos }]);
+  const set = (g) => balances.set('blackjack:dealer', JSON.stringify({ base: 20, bet: 20, deck: [], ...g }));
+  const settled = async (msg) => {
+    await Promise.all(pending.splice(0));
+    return edits.splice(0).map(([, content]) => content);
+  };
+  try {
+    balances.set('dealer', '100');
+    assert.equal((await deal(501)).data.flags, 64);
+    assert.equal((await deal(101)).data.flags, 64);
+
+    // Math.random 0 deals A♠ Q♣ to the player and K♣ J♣ to the dealer: a natural pays 3:2
+    Math.random = () => 0;
+    waits.length = 0;
+    const first = await deal(20);
+    assert.equal(first.data.content, table([`${FLIP} ${FLIP}`, ''], [`${FLIP} ${FLIP}`, ''], '-# panos 20 🪙'));
+    assert.deepEqual(labels(first), [['Ota kortti', true], ['Jää', true]]);
+    const dealt = await settled();
+    assert.deepEqual(dealt, [
+      table([`${FLIP} ${FLIP}`, ''], [`${E('sa')} ${FLIP}`, 11], '-# panos 20 🪙'),
+      table([`${E('ck')} ${FLIP}`, 10], [`${E('sa')} ${FLIP}`, 11], '-# panos 20 🪙'),
+      table([`${E('ck')} ${FLIP}`, 10], [E('sa', 'cq'), 21], '-# panos 20 🪙'),
+      table([E('ck', 'cj'), 20], [E('sa', 'cq'), 21], '### 🃏 Blackjack! +30 🪙\n-# panos 20 🪙 · saldo 130 🪙'),
+    ]);
+    assert.deepEqual(waits.splice(0), [600, 600, 600, 600]);
+    assert.equal(balances.get('dealer'), '130');
+    assert.equal(balances.has('blackjack:dealer'), false);
+
+    // hit: the new card flips in, then shows; a bust ends the hand
+    set({ player: ['h10', 's9'], dealer: ['c10', 'd6'], deck: ['sk'] });
+    balances.set('dealer', '100');
+    assert.equal((await press('stranger', 'blackjack:hit:dealer')).data.flags, 64);
+    const hit = await press('dealer', 'blackjack:hit:dealer');
+    assert.equal(hit.type, 7);
+    assert.equal(hit.data.content, table([`${E('c10')} ${BACK}`, 10], [`${E('h10', 's9')} ${FLIP}`, 19], '-# panos 20 🪙'));
+    assert.deepEqual(await settled(), [table([E('c10', 'd6'), 16], [E('h10', 's9', 'sk'), 29], '### Yli 21 · −20 🪙\n-# panos 20 🪙 · saldo 100 🪙')]);
+    assert.equal(balances.has('blackjack:dealer'), false);
+    assert.equal((await press('dealer', 'blackjack:stand:dealer')).data.flags, 64);
+
+    // stand: the hole card flips, the dealer draws to 17 or more
+    set({ player: ['h10', 's9'], dealer: ['c10', 'd6'], deck: ['h2'] });
+    const stand = await press('dealer', 'blackjack:stand:dealer');
+    assert.equal(stand.data.content, table([`${E('c10')} ${FLIP}`, 10], [E('h10', 's9'), 19], '-# panos 20 🪙'));
+    const drawn = await settled();
+    assert.equal(drawn.at(-1), table([E('c10', 'd6', 'h2'), 18], [E('h10', 's9'), 19], '### Voitit · +20 🪙\n-# panos 20 🪙 · saldo 140 🪙'));
+    assert.equal(drawn.length, 3);
+
+    // double: one more card for twice the bet, then the dealer plays
+    set({ player: ['h5', 's6'], dealer: ['c10', 'd7'], deck: ['sk'] });
+    balances.set('dealer', '100');
+    const doubled = await press('dealer', 'blackjack:double:dealer');
+    assert.equal(doubled.data.content, table([`${E('c10')} ${BACK}`, 10], [`${E('h5', 's6')} ${FLIP}`, 11], '-# panos 40 🪙 (tuplattu)'));
+    const end = (await settled()).at(-1);
+    assert.equal(end, table([E('c10', 'd7'), 17], [E('h5', 's6', 'sk'), 21], '### Voitit · +40 🪙\n-# panos 40 🪙 (tuplattu) · saldo 160 🪙'));
+    assert.equal(balances.get('dealer'), '160');
+
+    // a tie gives the bet back; the finished hand offers a new one with the same bet
+    set({ player: ['h10', 's8'], dealer: ['c10', 'd8'] });
+    await press('dealer', 'blackjack:stand:dealer');
+    const tie = (await settled()).at(-1);
+    assert.match(tie, /### Tasapeli · panos takaisin\n-# panos 20 🪙 · saldo 180 🪙$/u);
+    assert.equal(balances.get('dealer'), '180');
+
+    // a hand in progress: hit keeps it going without a double button; /blackjack shows it again
+    set({ player: ['h2', 'h5'], dealer: ['c10', 'd7'], deck: ['s6'] });
+    await press('dealer', 'blackjack:hit:dealer');
+    const going = await settled();
+    assert.equal(going.length, 1);
+    assert.equal(JSON.parse(balances.get('blackjack:dealer')).player.length, 3);
+    const shown = await deal(20);
+    assert.equal(shown.data.content, table([`${E('c10')} ${BACK}`, 10], ['<:h2:1558909418140213370> <:h5:1558909414361272485> <:s6:1558909387152691200>', 13], '-# panos 20 🪙'));
+    assert.deepEqual(labels(shown), [['Ota kortti', false], ['Jää', false]]);
+    assert.equal(balances.get('dealer'), '180');
+
+    // "Uusi peli" deals a new hand into the same message with the bet from the button
+    balances.delete('blackjack:dealer');
+    Math.random = () => 0;
+    const again = await press('dealer', 'blackjack:again:dealer:20');
+    assert.equal(again.type, 7);
+    assert.equal(again.data.content, table([`${FLIP} ${FLIP}`, ''], [`${FLIP} ${FLIP}`, ''], '-# panos 20 🪙'));
+    assert.match((await settled()).at(-1), /### 🃏 Blackjack! \+30 🪙\n-# panos 20 🪙 · saldo 210 🪙$/u);
+  } finally {
+    Math.random = originalRandom;
+  }
+});

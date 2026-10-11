@@ -20,6 +20,37 @@ const FLY_BITE = 23000;
 const FLY_COST = 8; // a boot gives the fly back, so only a snapped fly costs
 // /gatiska: an owned trap lasts 7 days and holds 6 fish; every full hour a fish swims in with 50 % chance. Rarer and heavier fish
 // like perho, double XP, sold at half price. Fish start dying 12 h after the last check, one more every 3 h.
+// blackjack: the app's card emojis (Developer Portal → Emojis), named suit (s, h, d, c) + rank (a, 2–10, j, q, k)
+const CARD = {
+  sa: '1558909376989892668', s2: '1558909393326833904', s3: '1558909392164749533', s4: '1558909390478639287', s5: '1558909388817698917', s6: '1558909387152691200', s7: '1558909385911177306', s8: '1558909384199770203', s9: '1558909382891405424', s10: '1558909395893493770', sj: '1558909381460889650', sq: '1558909378470481930', sk: '1558909379384967311',
+  ha: '1558909406924509254', h2: '1558909418140213370', h3: '1558909416802226246', h4: '1558909415476961291', h5: '1558909414361272485', h6: '1558909412112990339', h7: '1558909410665828512', h8: '1558909409554596022', h9: '1558909407889203311', h10: '1558909419243184278', hj: '1558909405297381448', hq: '1558909402508165170', hk: '1558909404055601163',
+  da: '1558909426658840777', d2: '1558909452650807367', d3: '1558909451086471239', d4: '1558909449840754708', d5: '1558909448414822541', d6: '1558909447126913135', d7: '1558909445612896406', d8: '1558909444107272302', d9: '1558909442815295660', d10: '1558909454077141113', dj: '1558909425195032636', dq: '1558909421818478663', dk: '1558909423597129758',
+  ca: '1558909460657733672', c2: '1558909473521934507', c3: '1558909472217370634', c4: '1558909470573207612', c5: '1558909469348466688', c6: '1558909468199096471', c7: '1558909466961903696', c8: '1558909465594564688', c9: '1558909462339780798', c10: '1558909475342123159', cj: '1558909458678022276', cq: '1558909455259934802', ck: '1558909456283209910',
+};
+const BACK = '<:kortti_selka:1558909399299522630>';
+const FLIP = '<a:kortti_flip:1558909401430229092>';
+const BJ = { min: 1, max: 500, step: 600 }; // bet limits; ms between dealt cards, like the slot reels
+const cardEmoji = (c) => `<:${c}:${CARD[c]}>`;
+const handValue = (cards) => {
+  let total = 0;
+  let aces = 0;
+  for (const c of cards) {
+    const rank = c.slice(1);
+    if (rank === 'a') aces++;
+    total += rank === 'a' ? 11 : 'jqk'.includes(rank) ? 10 : +rank;
+  }
+  for (; total > 21 && aces; aces--) total -= 10;
+  return total;
+};
+const isBlackjack = (cards) => cards.length === 2 && handValue(cards) === 21;
+const shuffledDeck = () => {
+  const deck = Object.keys(CARD);
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+};
 // /guoma: a free buddy casts the rod once a minute with the bait money you give him, a bit luckier than you. He keeps the
 // money from the fish, you get the XP. With 10 % chance per hire he ends up in jail and the catch costs bail; the catch is
 // paid out only when every cast is done.
@@ -212,13 +243,142 @@ export default {
       ].filter(Boolean).join('\n')];
     };
 
+    // one blackjack hand. Returns an error string (shown only to the player) or the frames to show: the first is the reply,
+    // the rest are edits BJ.step apart. Each request writes the wallet and the game at most once.
+    const blackjack = async (action, betArg) => {
+      const key = `blackjack:${playerId}`;
+      let g = JSON.parse((await store.get(key)) || 'null');
+      const [coins, day] = await walletOf(store, playerId);
+      const hand = (cards, extra = []) => ({ row: [...cards.map(cardEmoji), ...extra], total: cards.length ? handValue(cards) : '' });
+      const view = (dealer, player, bottom) =>
+        [`-# JAKAJA${dealer.total === '' ? '' : ` · ${dealer.total}`}`, `# ${dealer.row.join(' ')}`, `-# SINÄ${player.total === '' ? '' : ` · ${player.total}`}`, `# ${player.row.join(' ')}`, bottom].join('\n');
+      const stake = () => `-# panos ${g.bet} 🪙${g.bet > g.base ? ' (tuplattu)' : ''}`;
+      const buttons = (balance, disabled = false) => [
+        {
+          type: 1,
+          components: [
+            { type: 2, style: 1, custom_id: `blackjack:hit:${playerId}`, label: 'Ota kortti', disabled },
+            { type: 2, style: 2, custom_id: `blackjack:stand:${playerId}`, label: 'Jää', disabled },
+            ...(g.player.length === 2 && balance >= g.base ? [{ type: 2, style: 3, custom_id: `blackjack:double:${playerId}`, label: `Tuplaa +${g.base} 🪙`, disabled }] : []),
+          ],
+        },
+      ];
+      const off = () => buttons(0, true);
+      const playing = (balance) => [view(hand([g.dealer[0]], [BACK]), hand(g.player), stake()), buttons(balance)];
+      const frames = [];
+      let spend = 0;
+      const dealerPlays = () => {
+        frames.push([view(hand([g.dealer[0]], [FLIP]), hand(g.player), stake()), off()]);
+        frames.push([view(hand(g.dealer), hand(g.player), stake()), off()]);
+        while (handValue(g.dealer) < 17) {
+          frames.push([view(hand(g.dealer, [FLIP]), hand(g.player), stake()), off()]);
+          g.dealer.push(g.deck.pop());
+          frames.push([view(hand(g.dealer), hand(g.player), stake()), off()]);
+        }
+      };
+      const finish = async () => {
+        const p = handValue(g.player);
+        const d = handValue(g.dealer);
+        const blackjackPay = Math.floor(g.bet * 1.5); // 3:2, rounded down
+        const [payout, text] =
+          isBlackjack(g.player) && isBlackjack(g.dealer) ? [g.bet, 'Molemmilla blackjack · tasapeli']
+          : isBlackjack(g.player) ? [g.bet + blackjackPay, `🃏 Blackjack! +${blackjackPay} 🪙`]
+          : isBlackjack(g.dealer) ? [0, `Jakajalla blackjack · −${g.bet} 🪙`]
+          : p > 21 ? [0, `Yli 21 · −${g.bet} 🪙`]
+          : d > 21 ? [2 * g.bet, `Jakaja yli 21 · +${g.bet} 🪙`]
+          : p > d ? [2 * g.bet, `Voitit · +${g.bet} 🪙`]
+          : p < d ? [0, `Jakaja voitti · −${g.bet} 🪙`]
+          : [g.bet, 'Tasapeli · panos takaisin'];
+        const balance = coins - spend + payout;
+        await store.put(playerId, `${balance} ${day ?? ''}`.trim());
+        await store.delete(key);
+        const again = [{ type: 1, components: [{ type: 2, style: 1, custom_id: `blackjack:again:${playerId}:${g.base}`, label: `Uusi peli · ${g.base} 🪙` }] }];
+        if (!frames.at(-1)[0].includes(FLIP)) frames.pop(); // the result comes with the last card, not a step after it
+        frames.push([view(hand(g.dealer), hand(g.player), `### ${text}\n${stake()} · saldo ${balance} 🪙`), again]);
+        return frames;
+      };
+      const keep = async () => {
+        if (spend) await store.put(playerId, `${coins - spend} ${day ?? ''}`.trim());
+        await store.put(key, JSON.stringify(g), { expirationTtl: 86400 });
+        return frames;
+      };
+
+      if (action === 'deal' || action === 'again') {
+        if (g) return [playing(coins)]; // a hand is already on the table: show it again
+        if (!(betArg >= BJ.min && betArg <= BJ.max)) return `Panos on ${BJ.min}–${BJ.max} 🪙.`;
+        if (coins < betArg) return `Ei tarpeeksi kolikoita, sulla on **${coins}** 🪙`;
+        const deck = shuffledDeck();
+        g = { base: betArg, bet: betArg, deck, player: [], dealer: [] };
+        g.player.push(deck.pop());
+        g.dealer.push(deck.pop());
+        g.player.push(deck.pop());
+        g.dealer.push(deck.pop());
+        spend = betArg;
+        const [p1, p2] = g.player;
+        frames.push(
+          [view(hand([], [FLIP, FLIP]), hand([], [FLIP, FLIP]), stake()), off()],
+          [view(hand([], [FLIP, FLIP]), hand([p1], [FLIP]), stake()), off()],
+          [view(hand([g.dealer[0]], [FLIP]), hand([p1], [FLIP]), stake()), off()],
+          [view(hand([g.dealer[0]], [FLIP]), hand([p1, p2]), stake()), off()],
+        );
+        if (isBlackjack(g.player) || isBlackjack(g.dealer)) return finish();
+        frames.push(playing(coins - spend));
+        return keep();
+      }
+      if (!g) return 'Tämä peli on jo päättynyt. Aloita uusi: `/blackjack`';
+      if (action === 'double') {
+        if (g.player.length !== 2 || coins < g.base) return 'Tuplata voi vain kahdella ensimmäisellä kortilla, ja siihen tarvitaan panoksen verran kolikoita.';
+        spend = g.base;
+        g.bet = 2 * g.base;
+      }
+      if (action === 'hit' || action === 'double') {
+        frames.push([view(hand([g.dealer[0]], [BACK]), hand(g.player, [FLIP]), stake()), off()]);
+        g.player.push(g.deck.pop());
+        const p = handValue(g.player);
+        if (p > 21) return finish();
+        if (action === 'hit' && p < 21) {
+          frames.push(playing(coins));
+          return keep();
+        }
+        frames.push([view(hand([g.dealer[0]], [BACK]), hand(g.player), stake()), off()]);
+      }
+      dealerPlays(); // stand, a double, or 21
+      return finish();
+    };
+
+    // edits the original message frame by frame, BJ.step apart (the next edit waits for the previous one to land)
+    const animate = (later) => {
+      if (!later.length) return;
+      ctx.waitUntil(
+        (async () => {
+          let sent;
+          for (const [content, components] of later) {
+            await Promise.all([scheduler.wait(BJ.step), sent]);
+            sent = fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content, components }),
+            });
+          }
+          await sent;
+        })(),
+      );
+    };
+
     if (type === 3) {
       // buttons carry the id of the player who cast; older buttons without it belong to whoever clicks
-      const [game, , owner = playerId] = data.custom_id.split(':');
+      const [game, action, owner = playerId, bet] = data.custom_id.split(':');
       if (owner !== playerId) return reply('Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
         return flags ? reply(content, flags) : interactionUpdate(content);
+      }
+      if (game === 'blackjack') {
+        const frames = await blackjack(action, +bet);
+        if (typeof frames === 'string') return reply(frames, 64);
+        const [[content, components], ...later] = frames;
+        animate(later);
+        return interactionUpdate(content, components);
       }
       if (game === 'guoma') {
         const [flags, content] = await kuomaReport(true);
@@ -299,7 +459,7 @@ export default {
       const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
     };
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'guoma', 'verkko'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'guoma', 'verkko', 'blackjack'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
@@ -376,6 +536,15 @@ export default {
         })(),
       );
       return reply('🪰🎣 Heitit perhon veteen...\n〰️🌊〰️', undefined, button(id, 'Odota', true));
+    }
+
+    if (data.name === 'blackjack') {
+      if (!store) return reply('Blackjack vaatii käytössä olevan kolikkotallennuksen.', 64);
+      const frames = await blackjack('deal', o.panos);
+      if (typeof frames === 'string') return reply(frames, 64);
+      const [[content, components], ...later] = frames;
+      animate(later);
+      return reply(content, undefined, components);
     }
 
     if (data.name === 'guoma') {
