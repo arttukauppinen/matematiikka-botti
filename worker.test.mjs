@@ -514,7 +514,7 @@ test('guoma: avautuu tasolla 30, ilmainen, maksat syötit, pitää myyntirahat, 
   }
 });
 
-test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain pelaajan napit', async () => {
+test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain pelaajan napit, sessio ja raportti', async () => {
   const originalRandom = Math.random;
   const ids = { sa: '1558909376989892668', ck: '1558909456283209910', cq: '1558909455259934802', cj: '1558909458678022276', h10: '1558909419243184278', s9: '1558909382891405424', c10: '1558909475342123159', d6: '1558909447126913135', h2: '1558909418140213370', sk: '1558909379384967311', h5: '1558909414361272485', s6: '1558909387152691200', d7: '1558909445612896406', ha: '1558909406924509254', s8: '1558909384199770203', d8: '1558909444107272302' };
   const E = (...cards) => cards.map((c) => `<:${c}:${ids[c]}>`).join(' ');
@@ -544,7 +544,7 @@ test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain p
       table([`${FLIP} ${FLIP}`, ''], [`${E('sa')} ${FLIP}`, 11], '-# panos 20 🪙'),
       table([`${E('ck')} ${FLIP}`, 10], [`${E('sa')} ${FLIP}`, 11], '-# panos 20 🪙'),
       table([`${E('ck')} ${FLIP}`, 10], [E('sa', 'cq'), 21], '-# panos 20 🪙'),
-      table([E('ck', 'cj'), 20], [E('sa', 'cq'), 21], '### 🃏 Blackjack! +30 🪙\n-# panos 20 🪙 · saldo 130 🪙'),
+      table([E('ck', 'cj'), 20], [E('sa', 'cq'), 21], '### 🃏 Blackjack! +30 🪙\n-# panos 20 🪙 · saldo 130 🪙 · sessio +30 🪙 (1 käsi)'),
     ]);
     assert.deepEqual(waits.splice(0), [600, 600, 600, 600]);
     assert.equal(balances.get('dealer'), '130');
@@ -557,7 +557,7 @@ test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain p
     const hit = await press('dealer', 'blackjack:hit:dealer');
     assert.equal(hit.type, 7);
     assert.equal(hit.data.content, table([`${E('c10')} ${BACK}`, 10], [`${E('h10', 's9')} ${FLIP}`, 19], '-# panos 20 🪙'));
-    assert.deepEqual(await settled(), [table([E('c10', 'd6'), 16], [E('h10', 's9', 'sk'), 29], '### Yli 21 · −20 🪙\n-# panos 20 🪙 · saldo 100 🪙')]);
+    assert.deepEqual(await settled(), [table([E('c10', 'd6'), 16], [E('h10', 's9', 'sk'), 29], '### Yli 21 · −20 🪙\n-# panos 20 🪙 · saldo 100 🪙 · sessio −20 🪙 (1 käsi)')]);
     assert.equal(balances.has('blackjack:dealer'), false);
     assert.equal((await press('dealer', 'blackjack:stand:dealer')).data.flags, 64);
 
@@ -566,7 +566,7 @@ test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain p
     const stand = await press('dealer', 'blackjack:stand:dealer');
     assert.equal(stand.data.content, table([`${E('c10')} ${FLIP}`, 10], [E('h10', 's9'), 19], '-# panos 20 🪙'));
     const drawn = await settled();
-    assert.equal(drawn.at(-1), table([E('c10', 'd6', 'h2'), 18], [E('h10', 's9'), 19], '### Voitit · +20 🪙\n-# panos 20 🪙 · saldo 140 🪙'));
+    assert.equal(drawn.at(-1), table([E('c10', 'd6', 'h2'), 18], [E('h10', 's9'), 19], '### Voitit · +20 🪙\n-# panos 20 🪙 · saldo 140 🪙 · sessio +20 🪙 (1 käsi)'));
     assert.equal(drawn.length, 3);
 
     // double: one more card for twice the bet, then the dealer plays
@@ -575,14 +575,14 @@ test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain p
     const doubled = await press('dealer', 'blackjack:double:dealer');
     assert.equal(doubled.data.content, table([`${E('c10')} ${BACK}`, 10], [`${E('h5', 's6')} ${FLIP}`, 11], '-# panos 40 🪙 (tuplattu)'));
     const end = (await settled()).at(-1);
-    assert.equal(end, table([E('c10', 'd7'), 17], [E('h5', 's6', 'sk'), 21], '### Voitit · +40 🪙\n-# panos 40 🪙 (tuplattu) · saldo 160 🪙'));
+    assert.equal(end, table([E('c10', 'd7'), 17], [E('h5', 's6', 'sk'), 21], '### Voitit · +40 🪙\n-# panos 40 🪙 (tuplattu) · saldo 160 🪙 · sessio +40 🪙 (1 käsi)'));
     assert.equal(balances.get('dealer'), '160');
 
     // a tie gives the bet back; the finished hand offers a new one with the same bet
     set({ player: ['h10', 's8'], dealer: ['c10', 'd8'] });
     await press('dealer', 'blackjack:stand:dealer');
     const tie = (await settled()).at(-1);
-    assert.match(tie, /### Tasapeli · panos takaisin\n-# panos 20 🪙 · saldo 180 🪙$/u);
+    assert.match(tie, /### Tasapeli · panos takaisin\n-# panos 20 🪙 · saldo 180 🪙 · sessio \+0 🪙 \(1 käsi\)$/u);
     assert.equal(balances.get('dealer'), '180');
 
     // a hand in progress: hit keeps it going without a double button; /blackjack shows it again
@@ -596,13 +596,22 @@ test('blackjack: yksi viesti napeilla, kortit kääntyvät, 3:2, tuplaus, vain p
     assert.deepEqual(labels(shown), [['Ota kortti', false], ['Jää', false]]);
     assert.equal(balances.get('dealer'), '180');
 
-    // "Uusi peli" deals a new hand into the same message with the bet from the button
+    assert.equal((await press('dealer', 'blackjack:quit:dealer')).data.flags, 64); // finish the hand first
+
+    // "Uusi peli" deals a new hand into the same message and keeps the session (the tie above) going
     balances.delete('blackjack:dealer');
     Math.random = () => 0;
     const again = await press('dealer', 'blackjack:again:dealer:20');
     assert.equal(again.type, 7);
-    assert.equal(again.data.content, table([`${FLIP} ${FLIP}`, ''], [`${FLIP} ${FLIP}`, ''], '-# panos 20 🪙'));
-    assert.match((await settled()).at(-1), /### 🃏 Blackjack! \+30 🪙\n-# panos 20 🪙 · saldo 210 🪙$/u);
+    assert.equal(again.data.content, table([`${FLIP} ${FLIP}`, ''], [`${FLIP} ${FLIP}`, ''], '-# panos 20 🪙 · sessio +0 🪙 (1 käsi)'));
+    assert.match((await settled()).at(-1), /### 🃏 Blackjack! \+30 🪙\n-# panos 20 🪙 · saldo 210 🪙 · sessio \+30 🪙 \(2 kättä\)$/u);
+
+    // "Lopeta" turns the message into a report of the session and removes the buttons
+    const report = await press('dealer', 'blackjack:quit:dealer');
+    assert.equal(report.type, 7);
+    assert.equal(report.data.content, '## 🃏 Blackjack-sessio päättyi\n### +30 🪙\n-# 2 kättä · 1 voitto (1 blackjack) · 1 tasapeli · 0 häviötä\n-# saldo 210 🪙');
+    assert.deepEqual(report.data.components, []);
+    assert.equal((await press('dealer', 'blackjack:quit:dealer')).data.flags, 64);
   } finally {
     Math.random = originalRandom;
   }

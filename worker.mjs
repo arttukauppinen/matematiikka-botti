@@ -247,12 +247,17 @@ export default {
     // the rest are edits BJ.step apart. Each request writes the wallet and the game at most once.
     const blackjack = async (action, betArg) => {
       const key = `blackjack:${playerId}`;
+      const sessionKey = `blackjack-session:${playerId}`;
       let g = JSON.parse((await store.get(key)) || 'null');
+      if (g) g.session ??= { hands: 0, net: 0, wins: 0, blackjacks: 0, pushes: 0, losses: 0 };
       const [coins, day] = await walletOf(store, playerId);
       const hand = (cards, extra = []) => ({ row: [...cards.map(cardEmoji), ...extra], total: cards.length ? handValue(cards) : '' });
       const view = (dealer, player, bottom) =>
         [`-# JAKAJA${dealer.total === '' ? '' : ` · ${dealer.total}`}`, `# ${dealer.row.join(' ')}`, `-# SINÄ${player.total === '' ? '' : ` · ${player.total}`}`, `# ${player.row.join(' ')}`, bottom].join('\n');
-      const stake = () => `-# panos ${g.bet} 🪙${g.bet > g.base ? ' (tuplattu)' : ''}`;
+      const signed = (n) => `${n < 0 ? '−' : '+'}${Math.abs(n)} 🪙`;
+      const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+      const sessionText = (s) => (s.hands ? ` · sessio ${signed(s.net)} (${count(s.hands, 'käsi', 'kättä')})` : '');
+      const stake = (extra = '') => `-# panos ${g.bet} 🪙${g.bet > g.base ? ' (tuplattu)' : ''}${extra}${sessionText(g.session)}`;
       const buttons = (balance, disabled = false) => [
         {
           type: 1,
@@ -290,11 +295,27 @@ export default {
           : p < d ? [0, `Jakaja voitti · −${g.bet} 🪙`]
           : [g.bet, 'Tasapeli · panos takaisin'];
         const balance = coins - spend + payout;
+        const s = g.session;
+        s.hands++;
+        s.net += payout - g.bet;
+        if (payout > g.bet) s.wins++;
+        else if (payout === g.bet) s.pushes++;
+        else s.losses++;
+        if (payout > 2 * g.bet) s.blackjacks++;
         await store.put(playerId, `${balance} ${day ?? ''}`.trim());
         await store.delete(key);
-        const again = [{ type: 1, components: [{ type: 2, style: 1, custom_id: `blackjack:again:${playerId}:${g.base}`, label: `Uusi peli · ${g.base} 🪙` }] }];
+        await store.put(sessionKey, JSON.stringify(s), { expirationTtl: 86400 });
+        const next = [
+          {
+            type: 1,
+            components: [
+              { type: 2, style: 1, custom_id: `blackjack:again:${playerId}:${g.base}`, label: `Uusi peli · ${g.base} 🪙` },
+              { type: 2, style: 2, custom_id: `blackjack:quit:${playerId}`, label: 'Lopeta' },
+            ],
+          },
+        ];
         if (!frames.at(-1)[0].includes(FLIP)) frames.pop(); // the result comes with the last card, not a step after it
-        frames.push([view(hand(g.dealer), hand(g.player), `### ${text}\n${stake()} · saldo ${balance} 🪙`), again]);
+        frames.push([view(hand(g.dealer), hand(g.player), `### ${text}\n${stake(` · saldo ${balance} 🪙`)}`), next]);
         return frames;
       };
       const keep = async () => {
@@ -303,12 +324,22 @@ export default {
         return frames;
       };
 
+      if (action === 'quit') {
+        if (g) return 'Pelaa käsi loppuun ennen kuin lopetat.';
+        const s = JSON.parse((await store.get(sessionKey)) || 'null');
+        if (!s) return 'Tämä sessio on jo päättynyt.';
+        await store.delete(sessionKey);
+        const tally = [count(s.hands, 'käsi', 'kättä'), `${count(s.wins, 'voitto', 'voittoa')}${s.blackjacks ? ` (${count(s.blackjacks, 'blackjack', 'blackjackia')})` : ''}`, count(s.pushes, 'tasapeli', 'tasapeliä'), count(s.losses, 'häviö', 'häviötä')];
+        return [[`## 🃏 Blackjack-sessio päättyi\n### ${signed(s.net)}\n-# ${tally.join(' · ')}\n-# saldo ${coins} 🪙`, []]];
+      }
       if (action === 'deal' || action === 'again') {
         if (g) return [playing(coins)]; // a hand is already on the table: show it again
         if (!(betArg >= BJ.min && betArg <= BJ.max)) return `Panos on ${BJ.min}–${BJ.max} 🪙.`;
         if (coins < betArg) return `Ei tarpeeksi kolikoita, sulla on **${coins}** 🪙`;
         const deck = shuffledDeck();
-        g = { base: betArg, bet: betArg, deck, player: [], dealer: [] };
+        // /blackjack starts a new session, "Uusi peli" continues the one on the table
+        const session = (action === 'again' && JSON.parse((await store.get(sessionKey)) || 'null')) || { hands: 0, net: 0, wins: 0, blackjacks: 0, pushes: 0, losses: 0 };
+        g = { base: betArg, bet: betArg, deck, player: [], dealer: [], session };
         g.player.push(deck.pop());
         g.dealer.push(deck.pop());
         g.player.push(deck.pop());
