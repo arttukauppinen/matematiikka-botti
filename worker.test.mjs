@@ -397,7 +397,7 @@ test('perho: avautuu tasolla 10, maksaa 8, saapas palauttaa perhon, puolet tyhj�
   }
 });
 
-test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynnä 6 h:ssa, kuolevat 24 h jälkeen, saukko, harvinaisemmat ja isommat kalat, 2× XP, ruostuu viikossa', async () => {
+test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa 50 %:n todennäköisyydellä, max 6, kuolevat 12 h jälkeen, saukko, harvinaisemmat ja isommat kalat puoleen hintaan, 2× XP, ruostuu viikossa', async () => {
   const originalRandom = Math.random;
   const h = 36e5;
   const buy = [{ name: 'toiminto', value: 'osta' }];
@@ -417,38 +417,39 @@ test('gatiska: avautuu tasolla 20, 300 per katiska, max 5, kala tunnissa, täynn
 
     const now = Date.now();
     const at = (bought, checked) => ({ boughtAt: now - bought, checkedAt: now - checked });
-    balances.set('fishing-traps:trapper', JSON.stringify([at(6 * h, 6 * h), at(3.5 * h, 3.5 * h), at(29 * h, 29 * h), at(8 * 24 * h, 29 * h), at(0, 0)]));
-    // per trap: otter roll, then pick/weight/giant per fish. #1 full, #2 3 fish, #3 1 dead + otter eats the other 5, #4 rusted with 5 fish, 1 dead
-    const roll = (otter, fish) => [otter, ...Array(fish * 3).fill(0)];
-    // #2's first fish: 0.78 would be a särki with the rod's odds, √chance makes it a hauki and √0.25 puts it mid-range
-    const randoms = [...roll(0.5, 6), 0.5, 0.78, 0.25, 0, 0, 0, 0, 0, 0, 0, ...roll(0.05, 0), ...roll(0.5, 4)];
+    balances.set('fishing-traps:trapper', JSON.stringify([at(6 * h, 6 * h), at(3.5 * h, 3.5 * h), at(14 * h, 14 * h), at(8 * 24 * h, 26 * h), at(0, 0)]));
+    // per trap: one 50 % roll per full hour until full, an otter roll if anything is alive, then pick/weight/giant per fish
+    // #1 3 of 6 hours, #2 1 of 3, #3 full, 1 dead and the otter eats the other 5, #4 rusted with 2 fish, both dead, #5 empty
+    // #2's fish: 0.78 would be a särki with the rod's odds, √chance makes it a hauki and √0.25 puts it mid-range
+    const randoms = [0, 0.9, 0, 0.9, 0, 0.9, 0.5, ...Array(9).fill(0), 0, 0.9, 0.9, 0.5, 0.78, 0.25, 0, ...Array(6).fill(0), 0.05, 0, 0];
     Math.random = () => randoms.shift();
     const ahven = (n) => Array(n).fill(`${AHVEN} ahven 50 g`).join(' · ');
     assert.equal(
       (await command('trapper', 'gatiska')).data.content,
       [
         '🪤 Katiskat',
-        `#1 (7 pv) ${ahven(6)}`,
-        `#2 (7 pv) ${HAUKI} hauki 7,75 kg · ${ahven(2)}`,
-        '#3 (6 pv) 💀 1 kuoli · 🦦 saukko söi 5',
-        `#4 ruostui puhki 🗑️ 💀 1 kuoli · ${ahven(4)}`,
+        `#1 (7 pv) ${ahven(3)}`,
+        `#2 (7 pv) ${HAUKI} hauki 7,75 kg`,
+        '#3 (7 pv) 💀 1 kuoli · 🦦 saukko söi 5',
+        '#4 ruostui puhki 🗑️ 💀 2 kuoli',
         '#5 (7 pv) tyhjä',
-        '💰 **+19** 🪙 · 🎣 LVL **21** (+620 XP) ✨ Uusi taso!',
+        // half price: the 7,75 kg hauki sells for 4 instead of 7
+        '💰 **+7** 🪙 · 🎣 LVL **20** (+260 XP)',
       ].join('\n'),
     );
     assert.equal(randoms.length, 0);
     const left = JSON.parse(balances.get('fishing-traps:trapper'));
     assert.equal(left.length, 4);
     assert.equal(left[1].checkedAt, now - 0.5 * h);
-    assert.equal(balances.get('trapper'), '519');
-    assert.deepEqual(JSON.parse(balances.get('fishing:trapper')), { level: 21, xp: 5090 });
+    assert.equal(balances.get('trapper'), '507');
+    assert.deepEqual(JSON.parse(balances.get('fishing:trapper')), { level: 20, xp: 4730 });
     assert.match((await command('trapper', 'gatiska', buy)).data.content, /\(5\/5\)/u);
   } finally {
     Math.random = originalRandom;
   }
 });
 
-test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, raportti kesken, maksu lopussa, putka ja takuut', async () => {
+test('guoma: avautuu tasolla 30, ilmainen, maksat syötit, pitää myyntirahat, heitto minuutissa, raportti kesken, maksu lopussa, putka ja takuut', async () => {
   const originalRandom = Math.random;
   const SARKI = '<:sarki:1558100882086961179>';
   const hire = (id, kolikot) => command(id, 'guoma', [{ name: 'kolikot', value: kolikot }]);
@@ -465,7 +466,7 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
 
     Math.random = () => 0.5; // no jail this time
     assert.equal((await hire('buddy', 301)).data.content, '🧔 Palkkasit kuoman kalaan: 100 heittoa, noin 1 h 40 min. Katso tilanne ja lunasta saalis lopuksi: `/guoma`');
-    assert.equal(balances.get('buddy'), '600');
+    assert.equal(balances.get('buddy'), '700');
     assert.equal((await hire('buddy', 30)).data.flags, 64);
     const start = await command('buddy', 'guoma');
     assert.deepEqual([start.data.flags, start.data.content], [64, '🧔 Kuoma kalastaa: 0/100 heittoa, valmis noin 1 h 40 min kuluttua\nei saalista vielä']);
@@ -475,7 +476,7 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
     const report = `🧔 Kuoma kalastaa: 10/100 heittoa, valmis noin 1 h 30 min kuluttua\n${SARKI} ×10\n-# suurin tähän asti: ${SARKI} särki 730 g`;
     const mid = await command('buddy', 'guoma');
     assert.deepEqual([mid.data.flags, mid.data.content], [64, report]);
-    assert.equal(balances.get('buddy'), '600');
+    assert.equal(balances.get('buddy'), '700');
     // asking again doesn't roll the same casts again
     Math.random = () => 0.1;
     assert.equal((await command('buddy', 'guoma')).data.content, report);
@@ -483,13 +484,13 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
     minutesAgo('buddy', 500); // the other 90 casts are boots
     const done = await command('buddy', 'guoma');
     assert.equal(done.data.flags, 0);
-    assert.equal(done.data.content, `# ${SARKI} Särki\n-# 🧔 kuoman saalis 100/100 · 730 g · yleinen\n${SARKI} ×10 · 🥾 ×90\n💰 **+20** 🪙 · 🎣 LVL **30** (+250 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.`);
-    assert.equal(balances.get('buddy'), '620');
+    assert.equal(done.data.content, `# ${SARKI} Särki\n-# 🧔 kuoman saalis 100/100 · 730 g · yleinen\n${SARKI} ×10 · 🥾 ×90\n🧔 Kuoma myi kalat ja piti rahat (20 🪙)\n🎣 LVL **30** (+250 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.`);
+    assert.equal(balances.get('buddy'), '700');
     assert.equal(balances.has('fishing-kuoma:buddy'), false);
 
     Math.random = () => 0.05; // jail, and every cast snaps
     await hire('buddy', 15);
-    assert.equal(balances.get('buddy'), '505');
+    assert.equal(balances.get('buddy'), '685');
     minutesAgo('buddy', 3);
     assert.match((await command('buddy', 'guoma')).data.content, /^🧔 Kuoma kalastaa: 3\/5 heittoa, valmis noin 2 min kuluttua\n💥 ×3$/u);
     minutesAgo('buddy', 10);
@@ -502,7 +503,7 @@ test('guoma: avautuu tasolla 30, palkkio 100 + syötit, heitto minuutissa, rapor
     balances.set('buddy', '505');
     const bailed = await press('buddy', 'guoma:bail:buddy');
     assert.equal(bailed.type, 7);
-    assert.equal(bailed.data.content, '🧔 Kuoman saalis 5/5: ei kaloja\n💥 ×5\n🚔 Takuut −500 🪙\n💰 **+0** 🪙 · 🎣 LVL **30** (+0 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.');
+    assert.equal(bailed.data.content, '🧔 Kuoman saalis 5/5: ei kaloja\n💥 ×5\n🚔 Takuut −500 🪙\n🎣 LVL **30** (+0 XP)\n🧔 Kuoma käytti kaikki syötit ja lähti kotiin.');
     assert.equal(balances.get('buddy'), '5');
     assert.equal(balances.has('fishing-kuoma:buddy'), false);
     // a stale bail button doesn't charge again
