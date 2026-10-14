@@ -169,7 +169,7 @@ export default {
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { id: interactionId, type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
+    const { type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -409,16 +409,32 @@ export default {
     };
     const asJson = (body) => (typeof body === 'string' ? { headers: { 'Content-Type': 'application/json' } } : {});
     // A picture is uploaded with the message instead of linked: Discord stores it and knows its size before the message
-    // shows, where a link it fetches afterwards can flash and shrink. The HTTP response carries only JSON, so a message
-    // with a file goes to the callback endpoint and the request is answered 202. If the upload fails, it goes as text.
-    const answer = async (kind, msg) => {
-      if (msg.file) {
-        const body = rouletteBody(msg, (data) => ({ type: kind, data }));
-        const res = await fetch(`https://discord.com/api/v10/interactions/${interactionId}/${token}/callback`, { method: 'POST', body }).catch((err) => err);
-        if (res.ok) return new Response(null, { status: 202 });
-        console.error('ruletti: callback', res.status ?? res, res.text ? await res.text() : '');
+    // shows, where a link it fetches afterwards can flash and shrink. Files can't ride in the HTTP response, so a message
+    // with one is acknowledged at once (deferred) and then edited in with its file. If that edit fails, the message goes
+    // in as text; the returned response is the last edit's.
+    const show = async (msg) => {
+      const edit = (m) => {
+        const body = rouletteBody(m, (data) => data);
+        return fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, { method: 'PATCH', body, ...asJson(body) });
+      };
+      const res = await edit(msg);
+      if (res.ok || !msg.file) return res;
+      console.error('ruletti: picture edit', res.status, await res.text());
+      return edit({ ...msg, file: undefined });
+    };
+    // replies to a /ruletti interaction with msg (kind 4 a new message, 7 an update). With a picture the reply is
+    // deferred (5 or 6) and show brings the message in; `then` runs after it (a spin's result).
+    const answer = (kind, msg, then) => {
+      if (msg.file || then) {
+        ctx.waitUntil(
+          (async () => {
+            if (msg.file) await show(msg);
+            await then?.();
+          })(),
+        );
       }
-      return new Response(rouletteBody({ ...msg, file: undefined }, (data) => ({ type: kind, data })), { headers: { 'Content-Type': 'application/json' } });
+      if (msg.file) return Response.json({ type: kind === 4 ? 5 : 6 });
+      return new Response(rouletteBody(msg, (data) => ({ type: kind, data })), { headers: { 'Content-Type': 'application/json' } });
     };
 
     if (type === 3) {
@@ -431,25 +447,16 @@ export default {
         const out = await roulette(action, { store, playerId, wallet, assets: env.ASSETS, content: message?.content, arg: bet, values: data.values });
         if (typeof out === 'string') return reply(out, 64);
         const [now, result] = out;
-        const answered = await answer(7, now);
         // the wheel GIF plays, then the result replaces it. The spin message has no buttons, so a failed edit is retried once
-        const edit = () => {
-          const body = rouletteBody(result, (data) => data);
-          return fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, { method: 'PATCH', body, ...asJson(body) });
+        const spun = async () => {
+          await scheduler.wait(now.file ? RL.spin : RL.textSpin);
+          const res = await show(result);
+          if (res.ok) return;
+          console.error('ruletti: result edit', res.status, await res.text());
+          await scheduler.wait(1000);
+          await show(result);
         };
-        if (result) {
-          ctx.waitUntil(
-            (async () => {
-              await scheduler.wait(now.file ? RL.spin : RL.textSpin);
-              const res = await edit();
-              if (res.ok) return;
-              console.error('ruletti: result edit', res.status, await res.text());
-              await scheduler.wait(1000);
-              await edit();
-            })(),
-          );
-        }
-        return answered;
+        return answer(7, now, result && spun);
       }
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
