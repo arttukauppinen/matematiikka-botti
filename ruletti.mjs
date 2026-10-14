@@ -1,5 +1,6 @@
 // /ruletti: European roulette with one zero. Chips go on the table with buttons and two number menus; coins leave the
-// wallet only when the wheel spins. The pictures come from tools/ruletti.py through the Worker's static assets
+// wallet only when the wheel spins. The bets live in the message itself (see readTable), so placing chips writes
+// nothing to KV, whose free plan allows 1000 writes a day. The pictures come from tools/ruletti.py through the Worker's static assets
 // (env.ASSETS): a GIF of the wheel landing on each number, and the table that tableImage draws the chips on.
 // spin: ms from the spin to the result, the GIF's 4.8 s of motion (MOTION_MS in tools/ruletti.py) plus time to load it;
 // textSpin: the same without pictures
@@ -31,13 +32,25 @@ const spotName = (spot) => OUTSIDE[spot]?.[0].toLowerCase() ?? spot;
 const ball = (n) => (n === 0 ? '🟢' : RED.has(n) ? '🔴' : '⚫');
 const staked = (bets) => Object.values(bets).reduce((sum, amount) => sum + amount, 0);
 const listed = (bets) => SPOTS.filter((s) => bets[s]).map((s) => `${spotName(s)}: ${bets[s]}`).join(' · ');
+const BY_NAME = Object.fromEntries(SPOTS.map((s) => [spotName(s), s]));
 
-// one /ruletti action. Returns an error string (shown only to the player) or [message, result]: the message replaces
-// the table now and result, after a spin, replaces it RL.spin ms later. images = the origin serving the pictures.
-export const roulette = async (action, { store, playerId, wallet: [coins, day], images, arg, values = [] }) => {
-  const key = `ruletti:${playerId}`;
-  const saved = JSON.parse((await store.get(key)) || 'null') ?? { chip: 5, bets: {} };
-  const id =(...parts) => ['ruletti', parts[0], playerId, ...parts.slice(1)].join(':');
+// The table as the message shows it: "pelimerkki 5 🪙" and the bets on the last line, "-# 17: 5 · punainen: 20", as
+// table() and the spin result write them. Discord sends the bot's own message with every click, so players can't
+// change it; anything else, like the help line of an empty table, reads as no bets.
+const readTable = (content = '') => {
+  const chip = +content.match(/pelimerkki (\d+) 🪙/)?.[1];
+  const items = content.split('\n').at(-1).replace(/^-# /, '').split(' · ').map((item) => item.match(/^(.+): ([1-9]\d*)$/));
+  const valid = items.every((m) => m && Object.hasOwn(BY_NAME, m[1]));
+  const bets = valid ? Object.fromEntries(items.map(([, name, amount]) => [BY_NAME[name], +amount])) : {};
+  return { chip: RL.chips.includes(chip) ? chip : 5, bets: staked(bets) <= RL.max ? bets : {} };
+};
+
+// one /ruletti action on the table in `content`, the clicked message. Returns an error string (shown only to the
+// player) or [message, result]: the message replaces the table now and result, after a spin, replaces it RL.spin ms
+// later. images = the origin serving the pictures.
+export const roulette = async (action, { store, playerId, wallet: [coins, day], images, content, arg, values = [] }) => {
+  const saved = readTable(content);
+  const id = (...parts) => ['ruletti', parts[0], playerId, ...parts.slice(1)].join(':');
   const picture = (path) => (images ? [{ color: FELT, image: { url: `${images}/${path}` } }] : []);
 
   const table = (t) => {
@@ -82,7 +95,7 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
   };
 
   // the result is decided and paid before the wheel turns, so a lost edit can't lose coins
-  const spin = async (bets) => {
+  const spin = async ({ chip, bets }) => {
     const total = staked(bets);
     if (!total) return 'Aseta ensin panos.';
     if (coins < total) return `Ei tarpeeksi kolikoita, panokset ovat ${total} 🪙 ja sulla on **${coins}** 🪙`;
@@ -97,7 +110,8 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
         `## ${ball(n)} ${n}`,
         `### ${net > 0 ? `Voitit +${net} 🪙` : net < 0 ? `Hävisit −${-net} 🪙` : 'Tasan · ±0 🪙'}`,
         hits.length && `-# osui: ${hits.map((s) => `${spotName(s)} +${bets[s] * odds(s)}`).join(' · ')}`,
-        `-# panokset ${total} 🪙 · saldo ${balance} 🪙`,
+        `-# panokset ${total} 🪙 · saldo ${balance} 🪙 · pelimerkki ${chip} 🪙`,
+        `-# ${listed(bets)}`, // the bets stay in the message for "Pyöräytä uudestaan" and "Muuta panoksia"
       ].filter(Boolean).join('\n'),
       embeds: picture(`ruletti/${n}.png`),
       components: [
@@ -113,18 +127,7 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
     return [{ content: `## 🎡 Ruletti\n-# pyörä pyörii… · panokset ${total} 🪙\n-# ${listed(bets)}`, embeds: picture(`ruletti/${n}.gif`), components: [] }, result];
   };
 
-  // KV takes one write per key a second: a tap faster than that gets a message instead of a failed interaction
-  const save = async (t) => {
-    try {
-      await store.put(key, JSON.stringify(t), { expirationTtl: 86400 });
-      return [table(t)];
-    } catch (err) {
-      console.error('ruletti: save', err);
-      return 'Liian nopeasti! Odota hetki ja yritä uudelleen.';
-    }
-  };
-
-  if (action === 'spin') return spin(saved.bets);
+  if (action === 'spin') return spin(saved);
   if (action === 'bet' || action === 'num') {
     const spots = action === 'bet' ? [arg] : Array.isArray(values) ? values : [];
     if (!spots.length || !spots.every((s) => SPOTS.includes(s))) return 'Tuntematon panos.';
@@ -133,11 +136,11 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
     if (total > coins) return `Ei tarpeeksi kolikoita, sulla on **${coins}** 🪙`;
     const bets = { ...saved.bets };
     for (const s of spots) bets[s] = (bets[s] ?? 0) + saved.chip;
-    return save({ ...saved, bets });
+    return [table({ ...saved, bets })];
   }
-  if (action === 'chip') return save({ ...saved, chip: RL.chips[(RL.chips.indexOf(saved.chip) + 1) % RL.chips.length] });
-  if (action === 'clear') return save({ ...saved, bets: {} });
-  return [table(saved)]; // the command and "Muuta panoksia" show the table as it is
+  if (action === 'chip') return [table({ ...saved, chip: RL.chips[(RL.chips.indexOf(saved.chip) + 1) % RL.chips.length] })];
+  if (action === 'clear') return [table({ ...saved, bets: {} })];
+  return [table(saved)]; // "Muuta panoksia" shows the table as it is; the command opens an empty one
 };
 
 // --- the table picture: the chips drawn on the table from tools/ruletti.py, as a palette PNG -----------------------

@@ -629,12 +629,26 @@ const rouletteAssets = (missing) => ({
   },
 });
 const withImages = { ...env, ASSETS: rouletteAssets() };
-const ruletti = async (id, e = env) => (await call({ type: 2, application_id: 'app', token: 'tok', data: { name: 'ruletti', options: [] }, member: { user: { id, username: id } } }, '', e)).json();
-const rouletteTap = async (id, custom_id, values, e = env) => (await call({ type: 3, application_id: 'app', token: 'tok', data: { custom_id, values }, member: { user: { id } } }, '', e)).json();
+// the table message as Discord has it: every click carries it, like a real component interaction carries its message
+let rouletteShown = '';
+const ruletti = async (id, e = env) => {
+  const res = await (await call({ type: 2, application_id: 'app', token: 'tok', data: { name: 'ruletti', options: [] }, member: { user: { id, username: id } } }, '', e)).json();
+  rouletteShown = res.data.content;
+  return res;
+};
+const rouletteTap = async (id, custom_id, values, e = env, content = rouletteShown) => {
+  const res = await (await call({ type: 3, application_id: 'app', token: 'tok', data: { custom_id, values }, message: { content }, member: { user: { id } } }, '', e)).json();
+  if (res.type === 7) rouletteShown = res.data.content;
+  return res;
+};
 const rouletteButtons = (msg) => msg.data.components.slice(2).flatMap((row) => row.components.map((b) => [b.label, b.disabled ?? false]));
-const rouletteBets = (bets, chip = 5) => balances.set('ruletti:rl', JSON.stringify({ chip, bets }));
-// spins to n and returns the reply, the whole body of the result edit and how many edits were sent; Discord answers the
-// edits with `statuses` (then 200), errors are logged quietly into `logged`
+const rouletteNames = { low: '1–18', even: 'parillinen', red: 'punainen', black: 'musta', odd: 'pariton', high: '19–36', d1: '1–12', d2: '13–24', d3: '25–36', c3: 'ylärivi', c2: 'keskirivi', c1: 'alarivi' };
+const rouletteBets = (bets, chip = 5) => {
+  const listed = Object.entries(bets).map(([spot, amount]) => `${rouletteNames[spot] ?? spot}: ${amount}`).join(' · ');
+  rouletteShown = `## 🎡 Ruletti\n-# pelimerkki ${chip} 🪙 · panokset 0/500 🪙 · saldo 0 🪙\n-# ${listed}`;
+};
+// spins to n from the shown table and returns the reply, the whole body of the result edit and how many edits were sent;
+// Discord answers the edits with `statuses` (then 200), errors are logged quietly into `logged`
 const rouletteSpin = async (n, e = env, statuses = []) => {
   const [originalRandom, originalFetch, originalError] = [Math.random, globalThis.fetch, console.error];
   const sent = [];
@@ -648,6 +662,7 @@ const rouletteSpin = async (n, e = env, statuses = []) => {
   try {
     const now = await rouletteTap('rl', 'ruletti:spin:rl', undefined, e);
     await Promise.all(pending.splice(0));
+    if (sent.length) rouletteShown = sent.at(-1).content;
     return [now, sent.at(-1), sent.length, logged];
   } finally {
     Math.random = originalRandom;
@@ -656,8 +671,9 @@ const rouletteSpin = async (n, e = env, statuses = []) => {
   }
 };
 
-test('ruletti: pöytä napeilla ja numerovalikoilla, pelimerkki vaihtuu, panokset enintään 500 ja saldon verran, vain pelaajan pöytä', async () => {
+test('ruletti: pöytä napeilla ja numerovalikoilla, panokset viestissä eikä KV:ssä, pelimerkki vaihtuu, enintään 500 ja saldon verran, vain pelaajan pöytä', async () => {
   balances.set('rl', '100');
+  const kv = new Map(balances);
   const open = await ruletti('rl');
   assert.equal(open.type, 4);
   assert.equal(open.data.content, '## 🎡 Ruletti\n-# pelimerkki 5 🪙 · panokset 0/500 🪙 · saldo 100 🪙\n-# numero maksaa 35:1, tusina ja rivi 2:1, muut 1:1');
@@ -681,12 +697,16 @@ test('ruletti: pöytä napeilla ja numerovalikoilla, pelimerkki vaihtuu, panokse
   assert.equal(picked.data.content, '## 🎡 Ruletti\n-# pelimerkki 5 🪙 · panokset 15/500 🪙 · saldo 100 🪙\n-# 0: 5 · 17: 5 · punainen: 5');
   assert.equal(picked.data.components[0].components[0].options[17].description, 'panos 5 🪙');
   assert.deepEqual(rouletteButtons(picked).slice(-1), [['Pyöräytä', false]]);
-  assert.deepEqual(JSON.parse(balances.get('ruletti:rl')), { chip: 5, bets: { red: 5, 0: 5, 17: 5 } });
-  assert.equal(balances.get('rl'), '100'); // nothing is paid before the spin
 
   const chips = [];
   for (let k = 0; k < 4; k++) chips.push(rouletteButtons(await rouletteTap('rl', 'ruletti:chip:rl'))[13][0]);
   assert.deepEqual(chips, ['Pelimerkki 25 🪙', 'Pelimerkki 100 🪙', 'Pelimerkki 1 🪙', 'Pelimerkki 5 🪙']);
+  assert.equal(rouletteShown.split('\n')[2], '-# 0: 5 · 17: 5 · punainen: 5'); // the bets ride along in the message
+  assert.deepEqual(balances, kv); // and placing chips wrote nothing to KV
+
+  // a new /ruletti opens an empty table; a message that isn't a table reads as one
+  assert.equal((await ruletti('rl')).data.content.split('\n')[2], '-# numero maksaa 35:1, tusina ja rivi 2:1, muut 1:1');
+  assert.equal((await rouletteTap('rl', 'ruletti:edit:rl', undefined, env, 'jotain muuta')).data.content.split('\n')[1], '-# pelimerkki 5 🪙 · panokset 0/500 🪙 · saldo 100 🪙');
 
   rouletteBets({ red: 5 }, 100);
   assert.match((await rouletteTap('rl', 'ruletti:bet:rl:black')).data.content, /Ei tarpeeksi kolikoita/); // 105 > 100
@@ -697,20 +717,6 @@ test('ruletti: pöytä napeilla ja numerovalikoilla, pelimerkki vaihtuu, panokse
   assert.equal((await rouletteTap('rl', 'ruletti:num:rl:a', ['37'])).data.flags, 64);
   assert.equal((await rouletteTap('rl', 'ruletti:num:rl:a', null)).data.flags, 64); // a forged menu payload
 
-  // KV takes one write per key a second: a tap faster than that gets a message instead of a failed interaction
-  const [put, originalError] = [coins.put, console.error];
-  coins.put = async () => {
-    throw new Error('KV PUT failed: 429 Too Many Requests');
-  };
-  console.error = () => {};
-  try {
-    const fast = await rouletteTap('rl', 'ruletti:clear:rl');
-    assert.deepEqual([fast.data.flags, fast.data.content], [64, 'Liian nopeasti! Odota hetki ja yritä uudelleen.']);
-  } finally {
-    coins.put = put;
-    console.error = originalError;
-  }
-
   const cleared = await rouletteTap('rl', 'ruletti:clear:rl');
   assert.deepEqual(rouletteButtons(cleared).slice(-1), [['Pyöräytä', true]]);
   assert.equal((await rouletteTap('rl', 'ruletti:spin:rl')).data.content, 'Aseta ensin panos.');
@@ -718,7 +724,7 @@ test('ruletti: pöytä napeilla ja numerovalikoilla, pelimerkki vaihtuu, panokse
 
 test('ruletti: pyöräytys maksaa numerosta 35:1, tusinasta ja rivistä 2:1, muista 1:1, nolla vie ulkopanokset, tulos pyörän jälkeen', async () => {
   balances.set('rl', '1000');
-  rouletteBets({ 17: 5, black: 20, odd: 10, d2: 10, c1: 5 });
+  rouletteBets({ 17: 5, black: 20, odd: 10, d2: 10, c1: 5 }, 25);
   waits.length = 0;
   const [spinning, result] = await rouletteSpin(17, withImages);
   assert.equal(spinning.type, 7);
@@ -726,20 +732,25 @@ test('ruletti: pyöräytys maksaa numerosta 35:1, tusinasta ja rivistä 2:1, mui
   assert.deepEqual(spinning.data.embeds.map((e) => e.image.url), ['http://x/ruletti/17.gif']);
   assert.deepEqual(spinning.data.components, []);
   assert.deepEqual(waits.splice(0), [7000]);
-  assert.equal(result.content, '## ⚫ 17\n### Voitit +220 🪙\n-# osui: 17 +175 · musta +20 · pariton +10 · 13–24 +20\n-# panokset 50 🪙 · saldo 1220 🪙');
+  assert.equal(
+    result.content,
+    '## ⚫ 17\n### Voitit +220 🪙\n-# osui: 17 +175 · musta +20 · pariton +10 · 13–24 +20\n-# panokset 50 🪙 · saldo 1220 🪙 · pelimerkki 25 🪙\n-# 17: 5 · musta: 20 · pariton: 10 · 13–24: 10 · alarivi: 5',
+  );
   assert.deepEqual(result.embeds.map((e) => e.image.url), ['http://x/ruletti/17.png']);
   assert.deepEqual(result.components[0].components.map((b) => b.label), ['Pyöräytä uudestaan · 50 🪙', 'Muuta panoksia']);
   assert.equal(balances.get('rl'), '1220');
 
+  // the result without its last line, the bets
+  const outcome = async (n, ...rest) => (await rouletteSpin(n, ...rest))[1].content.split('\n').slice(0, -1).join('\n');
   const outside = { low: 1, even: 1, red: 1, black: 1, odd: 1, high: 1, d1: 1, d2: 1, d3: 1, c3: 1, c2: 1, c1: 1 };
   rouletteBets({ ...outside, 2: 1 });
-  assert.equal((await rouletteSpin(2))[1].content, '## ⚫ 2\n### Voitit +35 🪙\n-# osui: 2 +35 · 1–18 +1 · parillinen +1 · musta +1 · 1–12 +2 · keskirivi +2\n-# panokset 13 🪙 · saldo 1255 🪙');
+  assert.equal(await outcome(2), '## ⚫ 2\n### Voitit +35 🪙\n-# osui: 2 +35 · 1–18 +1 · parillinen +1 · musta +1 · 1–12 +2 · keskirivi +2\n-# panokset 13 🪙 · saldo 1255 🪙 · pelimerkki 5 🪙');
   rouletteBets(outside);
-  // five winners pay back the seven losers
-  assert.equal((await rouletteSpin(36))[1].content, '## 🔴 36\n### Tasan · ±0 🪙\n-# osui: parillinen +1 · punainen +1 · 19–36 +1 · 25–36 +2 · ylärivi +2\n-# panokset 12 🪙 · saldo 1255 🪙');
-  assert.equal((await rouletteSpin(0))[1].content, '## 🟢 0\n### Hävisit −12 🪙\n-# panokset 12 🪙 · saldo 1243 🪙');
+  // five winners pay back the seven losers; "Pyöräytä uudestaan" plays the bets in the result again
+  assert.equal(await outcome(36), '## 🔴 36\n### Tasan · ±0 🪙\n-# osui: parillinen +1 · punainen +1 · 19–36 +1 · 25–36 +2 · ylärivi +2\n-# panokset 12 🪙 · saldo 1255 🪙 · pelimerkki 5 🪙');
+  assert.equal(await outcome(0), '## 🟢 0\n### Hävisit −12 🪙\n-# panokset 12 🪙 · saldo 1243 🪙 · pelimerkki 5 🪙');
   rouletteBets({ red: 10, black: 10 });
-  assert.equal((await rouletteSpin(17))[1].content, '## ⚫ 17\n### Tasan · ±0 🪙\n-# osui: musta +10\n-# panokset 20 🪙 · saldo 1243 🪙');
+  assert.equal(await outcome(17), '## ⚫ 17\n### Tasan · ±0 🪙\n-# osui: musta +10\n-# panokset 20 🪙 · saldo 1243 🪙 · pelimerkki 5 🪙');
   assert.deepEqual(waits.splice(0), [1000, 1000, 1000, 1000]); // without pictures the result comes after a second
 
   // the spin message has no buttons, so a failed result edit is sent again a second later
@@ -750,11 +761,11 @@ test('ruletti: pyöräytys maksaa numerosta 35:1, tusinasta ja rivistä 2:1, mui
   assert.deepEqual(waits.splice(0), [1000, 1000]);
   assert.equal(balances.get('rl'), '1243'); // paid once
 
-  // "Pyöräytä uudestaan" needs the coins; "Muuta panoksia" brings the table back with the same bets
+  // "Pyöräytä uudestaan" needs the coins; "Muuta panoksia" brings the table back with the same bets and chip
   balances.set('rl', '15');
   assert.match((await rouletteTap('rl', 'ruletti:spin:rl')).data.content, /panokset ovat 20 🪙 ja sulla on \*\*15\*\*/);
   const back = await rouletteTap('rl', 'ruletti:edit:rl', undefined, withImages);
-  assert.equal(back.data.content.split('\n')[2], '-# punainen: 10 · musta: 10');
+  assert.equal(back.data.content, '## 🎡 Ruletti\n-# pelimerkki 5 🪙 · panokset 20/500 🪙 · saldo 15 🪙\n-# punainen: 10 · musta: 10');
   assert.deepEqual(back.data.embeds.map((e) => e.image.url), ['http://x/poyta.png?p=red.10,black.10']);
   assert.deepEqual(pending, []);
 });

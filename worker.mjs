@@ -172,7 +172,7 @@ export default {
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data, member, user, guild_id, application_id, token } = JSON.parse(body);
+    const { type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -407,9 +407,10 @@ export default {
       if (owner !== playerId) return reply(game === 'ruletti' ? 'Tämä ei ole sinun pöytäsi. Avaa oma: `/ruletti`' : 'Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
       if (game === 'ruletti') {
         if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
-        const out = await roulette(action, { store, playerId, wallet: await walletOf(store, playerId), images: env.ASSETS && url.origin, arg: bet, values: data.values });
+        const wallet = await walletOf(store, playerId);
+        const out = await roulette(action, { store, playerId, wallet, images: env.ASSETS && url.origin, content: message?.content, arg: bet, values: data.values });
         if (typeof out === 'string') return reply(out, 64);
-        const [message, result] = out;
+        const [now, result] = out;
         // the wheel GIF plays, then the result replaces it. The spin message has no buttons, so a failed edit is retried once
         const edit = () =>
           fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
@@ -429,7 +430,7 @@ export default {
             })(),
           );
         }
-        return Response.json({ type: 7, data: message });
+        return Response.json({ type: 7, data: now });
       }
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
@@ -611,8 +612,8 @@ export default {
 
     if (data.name === 'ruletti') {
       if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
-      const [message] = await roulette('open', { store, playerId, wallet: [coins, day], images: env.ASSETS && url.origin });
-      return Response.json({ type: 4, data: message });
+      const [table] = await roulette('open', { store, playerId, wallet: [coins, day], images: env.ASSETS && url.origin });
+      return Response.json({ type: 4, data: table });
     }
 
     if (data.name === 'guoma') {
