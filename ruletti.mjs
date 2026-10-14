@@ -33,16 +33,25 @@ const ball = (n) => (n === 0 ? '🟢' : RED.has(n) ? '🔴' : '⚫');
 const staked = (bets) => Object.values(bets).reduce((sum, amount) => sum + amount, 0);
 const listed = (bets) => SPOTS.filter((s) => bets[s]).map((s) => `${spotName(s)}: ${bets[s]}`).join(' · ');
 const BY_NAME = Object.fromEntries(SPOTS.map((s) => [spotName(s), s]));
+const nextChip = (chip) => RL.chips[(RL.chips.indexOf(chip) + 1) % RL.chips.length];
+const signed = (n) => `${n < 0 ? '−' : '+'}${Math.abs(n)} 🪙`;
+const rounds = (n) => `${n} ${n === 1 ? 'kierros' : 'kierrosta'}`;
+const sessionLine = (s) => `-# sessio ${signed(s.net)} · ${rounds(s.rounds)}${s.best ? ` · suurin voitto +${s.best} 🪙` : ''}`;
+const HELP = '🔄 Pelimerkki vaihtaa koon, muut napit ja numerot lisäävät pelimerkin · numero maksaa 35:1, tusina ja rivi 2:1, muut 1:1';
 
-// The table as the message shows it: "pelimerkki 5 🪙" and the bets on the last line, "-# 17: 5 · punainen: 20", as
-// table() and the spin result write them. Discord sends the bot's own message with every click, so players can't
-// change it; anything else, like the help line of an empty table, reads as no bets.
+// The table as the message shows it: "pelimerkki 5 🪙", the session line "-# sessio +120 🪙 · 4 kierrosta · suurin
+// voitto +175 🪙" and the bets on the last line, "-# 17: 5 · punainen: 20", as table() and the spin result write them.
+// Discord sends the bot's own message with every click, so players can't change it; anything else, like the help line
+// of an empty table, reads as no bets and no session.
 const readTable = (content = '') => {
   const chip = +content.match(/pelimerkki (\d+) 🪙/)?.[1];
   const items = content.split('\n').at(-1).replace(/^-# /, '').split(' · ').map((item) => item.match(/^(.+): ([1-9]\d*)$/));
   const valid = items.every((m) => m && Object.hasOwn(BY_NAME, m[1]));
   const bets = valid ? Object.fromEntries(items.map(([, name, amount]) => [BY_NAME[name], +amount])) : {};
-  return { chip: RL.chips.includes(chip) ? chip : 5, bets: staked(bets) <= RL.max ? bets : {} };
+  const line = content.split('\n').find((l) => l.startsWith('-# sessio ')) ?? '';
+  const [, sign, net = 0] = line.match(/^-# sessio ([+−])(\d+) 🪙/) ?? [];
+  const session = { net: (sign === '−' ? -1 : 1) * net, rounds: +(line.match(/· (\d+) kierros/)?.[1] ?? 0), best: +(line.match(/suurin voitto \+(\d+)/)?.[1] ?? 0) };
+  return { chip: RL.chips.includes(chip) ? chip : 5, bets: staked(bets) <= RL.max ? bets : {}, session };
 };
 
 // one /ruletti action on the table in `content`, the clicked message. Returns an error string (shown only to the
@@ -81,21 +90,22 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
       content: [
         '## 🎡 Ruletti',
         `-# pelimerkki ${t.chip} 🪙 · panokset ${total}/${RL.max} 🪙 · saldo ${coins} 🪙`,
-        `-# ${total ? listed(t.bets) : 'numero maksaa 35:1, tusina ja rivi 2:1, muut 1:1'}`,
-      ].join('\n'),
+        t.session.rounds && sessionLine(t.session),
+        `-# ${total ? listed(t.bets) : HELP}`,
+      ].filter(Boolean).join('\n'),
       embeds: picture(`poyta.png${chips ? `?p=${chips}` : ''}`),
       components: [
         menu('a', 0, 18),
         menu('b', 19, 36),
         { type: 1, components: [bet('low'), bet('even'), bet('red', 4), bet('black', 2, '⚫'), bet('odd')] },
         { type: 1, components: [bet('high'), bet('d1'), bet('d2'), bet('d3'), button('clear', 2, 'Tyhjennä', !total)] },
-        { type: 1, components: [bet('c3'), bet('c2'), bet('c1'), button('chip', 1, `Pelimerkki ${t.chip} 🪙`), button('spin', 3, 'Pyöräytä', !total)] },
+        { type: 1, components: [bet('c3'), bet('c2'), bet('c1'), { ...button('chip', 1, `Pelimerkki ${t.chip} → ${nextChip(t.chip)}`), emoji: { name: '🔄' } }, button('spin', 3, 'Pyöräytä', !total)] },
       ],
     };
   };
 
   // the result is decided and paid before the wheel turns, so a lost edit can't lose coins
-  const spin = async ({ chip, bets }) => {
+  const spin = async ({ chip, bets, session }) => {
     const total = staked(bets);
     if (!total) return 'Aseta ensin panos.';
     if (coins < total) return `Ei tarpeeksi kolikoita, panokset ovat ${total} 🪙 ja sulla on **${coins}** 🪙`;
@@ -105,12 +115,14 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
     const balance = coins - total + payout;
     await store.put(playerId, `${balance} ${day ?? ''}`.trim());
     const net = payout - total;
+    const s = { net: session.net + net, rounds: session.rounds + 1, best: Math.max(session.best, net) };
     const result = {
       content: [
         `## ${ball(n)} ${n}`,
         `### ${net > 0 ? `Voitit +${net} 🪙` : net < 0 ? `Hävisit −${-net} 🪙` : 'Tasan · ±0 🪙'}`,
-        hits.length && `-# osui: ${hits.map((s) => `${spotName(s)} +${bets[s] * odds(s)}`).join(' · ')}`,
+        hits.length && `-# osui: ${hits.map((spot) => `${spotName(spot)} +${bets[spot] * odds(spot)}`).join(' · ')}`,
         `-# panokset ${total} 🪙 · saldo ${balance} 🪙 · pelimerkki ${chip} 🪙`,
+        sessionLine(s),
         `-# ${listed(bets)}`, // the bets stay in the message for "Pyöräytä uudestaan" and "Muuta panoksia"
       ].filter(Boolean).join('\n'),
       embeds: picture(`ruletti/${n}.png`),
@@ -120,6 +132,7 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
           components: [
             { type: 2, style: 3, custom_id: id('spin'), label: `Pyöräytä uudestaan · ${total} 🪙` },
             { type: 2, style: 2, custom_id: id('edit'), label: 'Muuta panoksia' },
+            { type: 2, style: 2, custom_id: id('quit'), label: 'Lopeta' },
           ],
         },
       ],
@@ -138,8 +151,14 @@ export const roulette = async (action, { store, playerId, wallet: [coins, day], 
     for (const s of spots) bets[s] = (bets[s] ?? 0) + saved.chip;
     return [table({ ...saved, bets })];
   }
-  if (action === 'chip') return [table({ ...saved, chip: RL.chips[(RL.chips.indexOf(saved.chip) + 1) % RL.chips.length] })];
+  if (action === 'chip') return [table({ ...saved, chip: nextChip(saved.chip) })];
   if (action === 'clear') return [table({ ...saved, bets: {} })];
+  // "Lopeta" turns the result into a report of the session and takes the buttons away, so an old table can't be replayed
+  if (action === 'quit') {
+    const { net, rounds: played, best } = saved.session;
+    const tally = [rounds(played), best && `suurin voitto +${best} 🪙`].filter(Boolean).join(' · ');
+    return [{ content: `## 🎡 Ruletti-sessio päättyi\n### ${signed(net)}\n-# ${tally}\n-# saldo ${coins} 🪙`, embeds: [], components: [] }];
+  }
   return [table(saved)]; // "Muuta panoksia" shows the table as it is; the command opens an empty one
 };
 
