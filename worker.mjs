@@ -1,4 +1,4 @@
-import { RL, roulette, tableImage } from './ruletti.mjs';
+import { RL, roulette } from './ruletti.mjs';
 
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags, components) => Response.json({ type: 4, data: { content, flags, components } });
@@ -163,16 +163,13 @@ const calc = (s) => {
 
 export default {
   async fetch(req, env, ctx) {
-    const url = new URL(req.url);
-    // Discord fetches the /ruletti table picture with a plain GET; everything else is a signed interaction
-    if (req.method === 'GET' && url.pathname === '/poyta.png') return tableImage(url, env);
     const body = await req.text();
     const key = await crypto.subtle.importKey('raw', hex(env.DISCORD_PUBLIC_KEY), 'Ed25519', false, ['verify']);
     const msg = new TextEncoder().encode(req.headers.get('x-signature-timestamp') + body);
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
+    const { id: interactionId, type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -401,6 +398,29 @@ export default {
       );
     };
 
+    // a /ruletti message as a request body: with its picture as multipart, the file replacing the message's old one,
+    // or as JSON that also clears the old one. wrap puts the message where the request wants it.
+    const rouletteBody = ({ file, ...data }, wrap) => {
+      if (!file) return JSON.stringify(wrap({ ...data, attachments: [] }));
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify(wrap({ ...data, attachments: [{ id: 0, filename: file.name }] })));
+      form.append('files[0]', file.blob, file.name);
+      return form;
+    };
+    const asJson = (body) => (typeof body === 'string' ? { headers: { 'Content-Type': 'application/json' } } : {});
+    // A picture is uploaded with the message instead of linked: Discord stores it and knows its size before the message
+    // shows, where a link it fetches afterwards can flash and shrink. The HTTP response carries only JSON, so a message
+    // with a file goes to the callback endpoint and the request is answered 202. If the upload fails, it goes as text.
+    const answer = async (kind, msg) => {
+      if (msg.file) {
+        const body = rouletteBody(msg, (data) => ({ type: kind, data }));
+        const res = await fetch(`https://discord.com/api/v10/interactions/${interactionId}/${token}/callback`, { method: 'POST', body }).catch((err) => err);
+        if (res.ok) return new Response(null, { status: 202 });
+        console.error('ruletti: callback', res.status ?? res, res.text ? await res.text() : '');
+      }
+      return new Response(rouletteBody({ ...msg, file: undefined }, (data) => ({ type: kind, data })), { headers: { 'Content-Type': 'application/json' } });
+    };
+
     if (type === 3) {
       // buttons carry the id of the player who cast; older buttons without it belong to whoever clicks
       const [game, action, owner = playerId, bet] = data.custom_id.split(':');
@@ -408,20 +428,19 @@ export default {
       if (game === 'ruletti') {
         if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
         const wallet = await walletOf(store, playerId);
-        const out = await roulette(action, { store, playerId, wallet, images: env.ASSETS && url.origin, content: message?.content, arg: bet, values: data.values });
+        const out = await roulette(action, { store, playerId, wallet, assets: env.ASSETS, content: message?.content, arg: bet, values: data.values });
         if (typeof out === 'string') return reply(out, 64);
         const [now, result] = out;
+        const answered = await answer(7, now);
         // the wheel GIF plays, then the result replaces it. The spin message has no buttons, so a failed edit is retried once
-        const edit = () =>
-          fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(result),
-          });
+        const edit = () => {
+          const body = rouletteBody(result, (data) => data);
+          return fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, { method: 'PATCH', body, ...asJson(body) });
+        };
         if (result) {
           ctx.waitUntil(
             (async () => {
-              await scheduler.wait(env.ASSETS ? RL.spin : RL.textSpin);
+              await scheduler.wait(now.file ? RL.spin : RL.textSpin);
               const res = await edit();
               if (res.ok) return;
               console.error('ruletti: result edit', res.status, await res.text());
@@ -430,7 +449,7 @@ export default {
             })(),
           );
         }
-        return Response.json({ type: 7, data: now });
+        return answered;
       }
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
@@ -612,8 +631,8 @@ export default {
 
     if (data.name === 'ruletti') {
       if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
-      const [table] = await roulette('open', { store, playerId, wallet: [coins, day], images: env.ASSETS && url.origin });
-      return Response.json({ type: 4, data: table });
+      const [table] = await roulette('open', { store, playerId, wallet: [coins, day], assets: env.ASSETS });
+      return answer(4, table);
     }
 
     if (data.name === 'guoma') {
