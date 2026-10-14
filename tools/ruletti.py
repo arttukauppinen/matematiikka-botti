@@ -3,7 +3,7 @@
 - <n>.gif   the wheel spinning until the ball lands in n (n = 0-36); the wheel stops with n at 12 o'clock
 - <n>.png   the stopped wheel, the GIF's last frame
 - poyta.bin, pelimerkit.bin, poyta.json   the betting table and the chips, as palette indices the Worker draws
-  into a PNG (tableImage in ruletti.mjs)
+  into a PNG (drawTable in ruletti.mjs)
 
 usage: python tools/ruletti.py <out dir> [numbers...]      Pillow 12, see deploy.yml. Numbers render only those GIFs.
 """
