@@ -18,6 +18,17 @@ npx wrangler kv namespace create COINS
 
 Lisää komennon tulostama namespace `id` GitHub-repositorion Actions-salaisuuksiin nimellä `COINS_KV_NAMESPACE_ID`. Deploy-workflow käyttää tätä salaisuutta automaattisesti `COINS`-sidonnan luomiseen. Forkilla pitää olla oma Cloudflare KV -namespace ja omat salaisuudet; niitä ei kopioida alkuperäisestä repositoriosta.
 
+## Ruletti
+
+`/ruletti` avaa eurooppalaisen ruletin pöydän (yksi nolla). Valitse pelimerkki (1, 5, 25 tai 100) **Pelimerkki**-napista ja aseta panokset: numerot 0–36 kahdesta valikosta (monta numeroa kerralla) sekä napeista punainen, musta, parillinen, pariton, 1–18, 19–36, tusinat 1–12, 13–24 ja 25–36 ja rivit (pöydän kuvan ylä-, keski- ja alarivi). Numero maksaa 35:1, tusina ja rivi 2:1 ja muut 1:1; nollalla kaikki ulkopanokset häviävät. Panoksia voi olla yhteensä enintään 500 kolikkoa kierroksessa, ja ne veloitetaan vasta pyöräytettäessä. Panokset pysyvät pöytäviestissä eivätkä KV:ssä, joten pelimerkkien asettaminen ei kuluta KV:n kirjoituksia (vain pyöräytys tallentaa saldon), ja uusi `/ruletti` avaa tyhjän pöydän. Pöydän kuvassa pelimerkit näkyvät panosten kohdalla. **Pyöräytä** näyttää pyörän pyörivän, kunnes kuula pysähtyy voittonumeroon, ja sen jälkeen tuloksen. **Pyöräytä uudestaan** pelaa samat panokset uudelleen ja **Muuta panoksia** palaa pöytään. Vain pelaaja voi painaa oman pöytänsä nappeja.
+
+Kuvat tekee `tools/ruletti.py` (Python ja Pillow): jokaiselle numerolle GIF pyörästä, joka pysähtyy siihen, sekä pöytä ja pelimerkit, joista Worker piirtää pöydän kuvan osoitteeseen `/poyta.png`. Deploy-workflow ajaa skriptin ja julkaisee kuvat Workerin staattisina tiedostoina (`ASSETS`-sidonta). Ilman kuvia ruletti toimii pelkällä tekstillä. Paikallisesti kuvat syntyvät näin:
+
+```bash
+pip install pillow==12.3.0
+python tools/ruletti.py public
+```
+
 ## Kalastus
 
 `/galastus` maksaa 3 kolikkoa syötistä. Kala tarttuu satunnaisesti 2–20 sekunnin kuluttua. Kala pysyy koukussa vuorokauden, kunnes nostat sen napista, joten nettikatkos ei vie saalista. Uuden syötin voi heittää, kun kala on tarttunut, mutta silloin nostamatta jäänyt kala menetetään. Vain heittäjä voi nostaa oman saaliinsa. Saalis näyttää painon grammoina tai kilogrammoina ja myydään automaattisesti; painavampi kala antaa enemmän kolikoita. Kalalajeilla on eri harvinaisuudet ja hinnat, ja erittäin harvoin voi saada jättimäisen kalan. Siima voi myös katketa tai nostaa saaliiksi vanhan saappaan.

@@ -1,3 +1,5 @@
+import { RL, roulette, tableImage } from './ruletti.mjs';
+
 const hex = (s) => Uint8Array.from(s?.match(/../g) ?? [], (b) => parseInt(b, 16));
 const reply = (content, flags, components) => Response.json({ type: 4, data: { content, flags, components } });
 const fruits = ['🍒', '🍋', '🍉', '🍇', '🍊', '💀'];
@@ -161,13 +163,16 @@ const calc = (s) => {
 
 export default {
   async fetch(req, env, ctx) {
+    const url = new URL(req.url);
+    // Discord fetches the /ruletti table picture with a plain GET; everything else is a signed interaction
+    if (req.method === 'GET' && url.pathname === '/poyta.png') return tableImage(url, env);
     const body = await req.text();
     const key = await crypto.subtle.importKey('raw', hex(env.DISCORD_PUBLIC_KEY), 'Ed25519', false, ['verify']);
     const msg = new TextEncoder().encode(req.headers.get('x-signature-timestamp') + body);
     const ok = await crypto.subtle.verify('Ed25519', key, hex(req.headers.get('x-signature-ed25519')), msg).catch(() => false);
     if (!ok) return new Response(null, { status: 401 });
 
-    const { type, data, member, user, guild_id, application_id, token } = JSON.parse(body);
+    const { type, data, member, user, guild_id, application_id, token, message } = JSON.parse(body);
     if (type === 1) return Response.json({ type: 1 });
 
     const o = Object.fromEntries((data.options ?? []).map((x) => [x.name, x.value]));
@@ -399,7 +404,34 @@ export default {
     if (type === 3) {
       // buttons carry the id of the player who cast; older buttons without it belong to whoever clicks
       const [game, action, owner = playerId, bet] = data.custom_id.split(':');
-      if (owner !== playerId) return reply('Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
+      if (owner !== playerId) return reply(game === 'ruletti' ? 'Tämä ei ole sinun pöytäsi. Avaa oma: `/ruletti`' : 'Tämä ei ole sinun saaliisi. Heitä omasi: `/galastus` tai `/verkko`.', 64);
+      if (game === 'ruletti') {
+        if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
+        const wallet = await walletOf(store, playerId);
+        const out = await roulette(action, { store, playerId, wallet, images: env.ASSETS && url.origin, content: message?.content, arg: bet, values: data.values });
+        if (typeof out === 'string') return reply(out, 64);
+        const [now, result] = out;
+        // the wheel GIF plays, then the result replaces it. The spin message has no buttons, so a failed edit is retried once
+        const edit = () =>
+          fetch(`https://discord.com/api/v10/webhooks/${application_id}/${token}/messages/@original`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(result),
+          });
+        if (result) {
+          ctx.waitUntil(
+            (async () => {
+              await scheduler.wait(env.ASSETS ? RL.spin : RL.textSpin);
+              const res = await edit();
+              if (res.ok) return;
+              console.error('ruletti: result edit', res.status, await res.text());
+              await scheduler.wait(1000);
+              await edit();
+            })(),
+          );
+        }
+        return Response.json({ type: 7, data: now });
+      }
       if (game === 'verkko') {
         const [flags, content] = await raiseNet();
         return flags ? reply(content, flags) : interactionUpdate(content);
@@ -490,7 +522,7 @@ export default {
       const key = `g:${guild_id}:${id}`;
       if ((await store.get(key)) !== name) await store.put(key, name);
     };
-    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'guoma', 'verkko', 'blackjack'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
+    if (store && guild_id && ['kukkaro', 'goneisii', 'gruunavaiglaava', 'lainaa', 'galastus', 'perho', 'gatiska', 'guoma', 'verkko', 'blackjack', 'ruletti'].includes(data.name)) await mark(playerId, member, member?.user ?? user);
 
     const [coins, day] = store ? await walletOf(store, playerId) : [];
     if (data.name === 'kukkaro') return reply(`Sulla on **${coins ?? 0}** kolikkoa 🪙`);
@@ -576,6 +608,12 @@ export default {
       const [[content, components], ...later] = frames;
       animate(later);
       return reply(content, undefined, components);
+    }
+
+    if (data.name === 'ruletti') {
+      if (!store) return reply('Ruletti vaatii käytössä olevan kolikkotallennuksen.', 64);
+      const [table] = await roulette('open', { store, playerId, wallet: [coins, day], images: env.ASSETS && url.origin });
+      return Response.json({ type: 4, data: table });
     }
 
     if (data.name === 'guoma') {
