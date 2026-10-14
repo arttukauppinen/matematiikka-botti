@@ -632,15 +632,17 @@ const rouletteAssets = (missing) => ({
 });
 const withImages = { ...env, ASSETS: rouletteAssets() };
 const rouletteHelp = '🔄 Pelimerkki vaihtaa koon, muut napit ja numerot lisäävät pelimerkin · numero maksaa 35:1, tusina ja rivi 2:1, muut 1:1';
-// Discord's end: every callback (POST) and edit (PATCH) the bot sends, with its payload and uploaded file, answered
-// with the queued statuses for that method (then 200). The roulette tests run with this as fetch.
-const discord = { sent: [], statuses: { POST: [], PATCH: [] } };
+// Discord's end: every edit of the original message the bot sends, with its payload, uploaded file and the status it
+// got, the queued discord.statuses (then 200). The roulette tests run with this as fetch.
+const discord = { sent: [], statuses: [] };
 const toDiscord = async (url, init) => {
+  assert.deepEqual([url, init.method], ['https://discord.com/api/v10/webhooks/app/tok/messages/@original', 'PATCH']);
   const form = init.body instanceof FormData ? init.body : undefined;
   const file = form?.get('files[0]');
   const upload = file && { name: file.name, bytes: Buffer.from(await file.arrayBuffer()) };
-  discord.sent.push({ url, method: init.method, payload: JSON.parse(form ? form.get('payload_json') : init.body), file: upload });
-  return new Response(null, { status: discord.statuses[init.method].shift() ?? 200 });
+  const status = discord.statuses.shift() ?? 200;
+  discord.sent.push({ status, payload: JSON.parse(form ? form.get('payload_json') : init.body), file: upload });
+  return new Response(null, { status });
 };
 const rouletteTest = (name, fn) =>
   test(name, async () => {
@@ -651,30 +653,32 @@ const rouletteTest = (name, fn) =>
     } finally {
       globalThis.fetch = originalFetch;
       discord.sent.length = 0;
-      discord.statuses = { POST: [], PATCH: [] };
+      discord.statuses.length = 0;
     }
   });
-// one interaction; a reply that went to the callback endpoint (HTTP 202) is read from what Discord got. Takes only the
-// callbacks: a result edit can already have landed in discord.sent before the reply is read.
+// one interaction and everything it sends, waitUntil included: its reply and the edits that followed
 const rouletteCall = async (interaction, e) => {
-  const res = await call({ id: 'i1', application_id: 'app', token: 'tok', ...interaction }, '', e);
-  const callbacks = discord.sent.filter((sent) => sent.method === 'POST');
-  discord.sent = discord.sent.filter((sent) => sent.method !== 'POST');
-  if (res.status !== 202) return res.json();
-  assert.equal(callbacks.at(-1).url, 'https://discord.com/api/v10/interactions/i1/tok/callback');
-  return { ...callbacks.at(-1).payload, file: callbacks.at(-1).file };
+  const res = await (await call({ application_id: 'app', token: 'tok', ...interaction }, '', e)).json();
+  await Promise.all(pending.splice(0));
+  return [res, discord.sent.splice(0)];
+};
+// what the player sees: the reply, or after a deferred one (5 or 6) the first edit that went through, with its file
+const seen = (res, edits) => {
+  if (res.type !== 5 && res.type !== 6) return res;
+  const edit = edits.find((sent) => sent.status < 300);
+  return { type: res.type === 5 ? 4 : 7, deferred: res.type, data: edit.payload, file: edit.file };
 };
 // the table message as Discord has it: every click carries it, like a real component interaction carries its message
 let rouletteShown = '';
 const ruletti = async (id, e = env) => {
-  const res = await rouletteCall({ type: 2, data: { name: 'ruletti', options: [] }, member: { user: { id, username: id } } }, e);
-  rouletteShown = res.data.content;
-  return res;
+  const shown = seen(...(await rouletteCall({ type: 2, data: { name: 'ruletti', options: [] }, member: { user: { id, username: id } } }, e)));
+  rouletteShown = shown.data.content;
+  return shown;
 };
 const rouletteTap = async (id, custom_id, values, e = env, content = rouletteShown) => {
-  const res = await rouletteCall({ type: 3, data: { custom_id, values }, message: { content }, member: { user: { id } } }, e);
-  if (res.type === 7) rouletteShown = res.data.content;
-  return res;
+  const shown = seen(...(await rouletteCall({ type: 3, data: { custom_id, values }, message: { content }, member: { user: { id } } }, e)));
+  if (shown.type === 7) rouletteShown = shown.data.content;
+  return shown;
 };
 const rouletteButtons = (msg) => msg.data.components.slice(2).flatMap((row) => row.components.map((b) => [b.label, b.disabled ?? false]));
 const rouletteNames = { low: '1–18', even: 'parillinen', red: 'punainen', black: 'musta', odd: 'pariton', high: '19–36', d1: '1–12', d2: '13–24', d3: '25–36', c3: 'ylärivi', c2: 'keskirivi', c1: 'alarivi' };
@@ -682,21 +686,22 @@ const rouletteBets = (bets, chip = 5) => {
   const listed = Object.entries(bets).map(([spot, amount]) => `${rouletteNames[spot] ?? spot}: ${amount}`).join(' · ');
   rouletteShown = `## 🎡 Ruletti\n-# pelimerkki ${chip} 🪙 · panokset 0/500 🪙 · saldo 0 🪙\n-# ${listed}`;
 };
-// spins to n from the shown table and returns the reply, the result edit (payload and file), how many edits were sent
-// and what was logged; Discord answers the edits with `statuses`
+// spins to n from the shown table and returns what showed first, the result edit (payload and file), how many result
+// edits were sent and what was logged; Discord answers the edits with `statuses`
 const rouletteSpin = async (n, e = env, statuses = []) => {
   const [originalRandom, originalError] = [Math.random, console.error];
   const logged = [];
   Math.random = () => (n + 0.5) / 37;
   console.error = (...args) => logged.push(args);
-  discord.statuses.PATCH.push(...statuses);
+  discord.statuses.push(...statuses);
   try {
-    const now = await rouletteTap('rl', 'ruletti:spin:rl', undefined, e);
-    await Promise.all(pending.splice(0));
-    const edits = discord.sent.splice(0);
-    for (const sent of edits) assert.deepEqual([sent.url, sent.method], ['https://discord.com/api/v10/webhooks/app/tok/messages/@original', 'PATCH']);
-    if (edits.length) rouletteShown = edits.at(-1).payload.content;
-    return [now, edits.length ? { ...edits.at(-1).payload, file: edits.at(-1).file } : undefined, edits.length, logged];
+    const [res, edits] = await rouletteCall({ type: 3, data: { custom_id: 'ruletti:spin:rl' }, message: { content: rouletteShown }, member: { user: { id: 'rl' } } }, e);
+    const now = seen(res, edits);
+    // with pictures the first edit that went through showed the spin, and the result edits follow it
+    const results = now.deferred ? edits.slice(edits.findIndex((sent) => sent.status < 300) + 1) : edits;
+    const last = results.at(-1);
+    if (last) rouletteShown = last.payload.content;
+    return [now, last && { ...last.payload, file: last.file }, results.length, logged];
   } finally {
     Math.random = originalRandom;
     console.error = originalError;
@@ -759,9 +764,10 @@ rouletteTest('ruletti: pyöräytys maksaa numerosta 35:1, tusinasta ja rivistä 
   balances.set('rl', '1000');
   rouletteBets({ 17: 5, black: 20, odd: 10, d2: 10, c1: 5 }, 25);
   waits.length = 0;
-  // with pictures the wheel GIF is uploaded with the spin message and the still with the result
+  // with pictures the click is acknowledged at once (6), then the spin message comes in with the wheel GIF uploaded,
+  // and the result with the still
   const [spinning, result] = await rouletteSpin(17, withImages);
-  assert.equal(spinning.type, 7);
+  assert.deepEqual([spinning.type, spinning.deferred], [7, 6]);
   assert.equal(spinning.data.content, '## 🎡 Ruletti\n-# pyörä pyörii… · panokset 50 🪙\n-# 17: 5 · musta: 20 · pariton: 10 · 13–24: 10 · alarivi: 5');
   assert.deepEqual([spinning.data.attachments, spinning.file.name, String(spinning.file.bytes)], [[{ id: 0, filename: 'pyora.gif' }], 'pyora.gif', '/ruletti/17.gif']);
   assert.deepEqual(spinning.data.components, []);
@@ -831,6 +837,9 @@ rouletteTest('ruletti: sessio kulkee viestissä pyöräytyksestä toiseen, Lopet
 rouletteTest('ruletti: kuvat ladataan viestin mukana, pöytä on PNG jossa pelimerkit panosten kohdalla, ilman kuvia peli jatkuu tekstinä', async () => {
   const { inflateSync, crc32 } = await import('node:zlib');
   balances.set('rl', '1000');
+  // /ruletti is acknowledged as "thinking" (5) and the table comes in with its picture; a click is acknowledged with 6
+  const opened = await ruletti('rl', withImages);
+  assert.deepEqual([opened.deferred, opened.type, opened.data.attachments, opened.file.name], [5, 4, [{ id: 0, filename: 'poyta.png' }], 'poyta.png']);
   rouletteBets({ 17: 5, red: 20 });
   const shown = await rouletteTap('rl', 'ruletti:edit:rl', undefined, withImages);
   assert.deepEqual([shown.type, shown.data.attachments, shown.file.name], [7, [{ id: 0, filename: 'poyta.png' }], 'poyta.png']);
@@ -860,8 +869,8 @@ rouletteTest('ruletti: kuvat ladataan viestin mukana, pöytä on PNG jossa pelim
   const logged = [];
   console.error = (...args) => logged.push(args);
   try {
-    // Discord refuses the upload: the table goes out as text in the HTTP response
-    discord.statuses.POST.push(500);
+    // Discord refuses the upload: the table is edited in as text instead
+    discord.statuses.push(500);
     const plain = await rouletteTap('rl', 'ruletti:edit:rl', undefined, withImages);
     assert.deepEqual([plain.type, plain.file, plain.data.attachments, plain.data.content.split('\n').at(-1)], [7, undefined, [], '-# 17: 5 · punainen: 20']);
     assert.equal(logged.at(-1)[1], 500);
