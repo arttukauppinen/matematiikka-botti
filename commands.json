@@ -66,6 +66,7 @@
     "contexts": [0, 1, 2],
     "options": [{ "type": 4, "name": "panos", "description": "panos 1–500", "required": true, "min_value": 1, "max_value": 500 }]
   },
+  { "name": "ruletti", "description": "Eurooppalainen ruletti: aseta pelimerkit pöytään ja pyöräytä (panokset enintään 500)", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   { "name": "kalastustaso", "description": "Näytä kalastustaso ja kalojen avautumisvaatimukset", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   { "name": "kukkaro", "description": "Näytä kolikkosaldosi", "integration_types": [0, 1], "contexts": [0, 1, 2] },
   { "name": "leaderboard", "description": "Palvelimen rikkaimmat pelaajat", "integration_types": [0, 1], "contexts": [0] },

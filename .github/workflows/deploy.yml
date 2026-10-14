@@ -9,6 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: node --test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # the table and one wheel: a broken /ruletti image generator fails here instead of in deploy
+      - run: pip install pillow==12.3.0 && python tools/ruletti.py public 0
 
   deploy:
     if: github.event_name == 'push'
@@ -17,8 +22,13 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # the /ruletti wheel GIFs and table, deployed as the Worker's static assets (env.ASSETS)
+      - run: pip install pillow==12.3.0 && python tools/ruletti.py public
       - run: |
-          echo "{\"kv_namespaces\":[{\"binding\":\"COINS\",\"id\":\"$COINS_KV_NAMESPACE_ID\"}]}" > wrangler.json
+          echo "{\"kv_namespaces\":[{\"binding\":\"COINS\",\"id\":\"$COINS_KV_NAMESPACE_ID\"}],\"assets\":{\"directory\":\"public\",\"binding\":\"ASSETS\"}}" > wrangler.json
           npx -y wrangler@4 deploy worker.mjs --name matematiikka-botti --compatibility-date 2026-09-01 --var DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
